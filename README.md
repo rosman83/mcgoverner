@@ -24,7 +24,7 @@ own text + OCR + caption, so redundancy in questions simply mirrors the source s
 
 1. **Learn** — pick today's lecture, read the condensed summary.
 2. **Drill** — start a session (tutor or quiz mode, UWorld-style MCQs with teaching explanations).
-3. **Review** — do "due reviews" (spaced repetition pulls old material back automatically).
+3. **Review** — do "due reviews" (missed questions).
 
 Sessions are dynamic: set your own target, pause/resume anytime, answers update the scheduler.
 
