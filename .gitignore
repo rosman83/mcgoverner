@@ -4,7 +4,7 @@ lectures/
 .env
 __pycache__/
 *.pyc
-packaging/Block1Exam.app/
-packaging/Block1Exam.app.zip
-packaging/windows/Block1Exam-Windows.zip
+packaging/McGoverner.app/
+packaging/McGoverner.app.zip
+packaging/windows/McGoverner-Windows.zip
 .DS_Store

@@ -6,7 +6,7 @@ name: Release Windows launcher
 # so this doesn't need to run on every commit.
 on:
   push:
-    branches: [rashid/vision-fallback-and-config]
+    branches: [main]
     paths: ["packaging/windows/**", "run.ps1"]
   workflow_dispatch: {}
 
@@ -21,15 +21,15 @@ jobs:
 
       - name: Zip the launcher
         shell: pwsh
-        run: Compress-Archive -Path packaging\windows\* -DestinationPath packaging\windows\Block1Exam-Windows.zip -Force
+        run: Compress-Archive -Path packaging\windows\McGoverner.bat,packaging\windows\launch.ps1 -DestinationPath packaging\windows\McGoverner-Windows.zip -Force
 
       - name: Publish to the shared launcher release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: mac-launcher-latest
-          name: Block1Exam Launchers
+          tag_name: launcher-latest
+          name: McGoverner Launchers
           make_latest: "true"
-          files: packaging/windows/Block1Exam-Windows.zip
+          files: packaging/windows/McGoverner-Windows.zip
           # No `body:` here on purpose - this and the Mac workflow both publish
           # to the same release tag, and omitting body leaves whatever's
           # already there untouched instead of one workflow clobbering the

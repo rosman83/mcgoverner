@@ -8,10 +8,10 @@
 # every time.
 set -uo pipefail
 
-REPO_URL="https://github.com/redfluff20/Block1Exam.git"
-REPO_BRANCH="rashid/vision-fallback-and-config"   # everyone tracks this branch, not main
-ZIP_URL="https://github.com/redfluff20/Block1Exam/archive/refs/heads/${REPO_BRANCH}.zip"
-RUN_LOG="/tmp/block1exam-run.log"
+REPO_URL="https://github.com/rosman83/mcgoverner.git"
+REPO_BRANCH="main"
+ZIP_URL="https://github.com/rosman83/mcgoverner/archive/refs/heads/${REPO_BRANCH}.zip"
+RUN_LOG="/tmp/mcgoverner-run.log"
 
 # Every failure path used to just... end. No window, no error, nothing visible
 # for someone who doesn't know to go looking for a log file in /tmp. Show an
@@ -25,7 +25,7 @@ on run argv
   set theMsg to item 1 of argv
   set theDetail to item 2 of argv
   display dialog theMsg & return & return & theDetail buttons {"OK"} ¬
-    with title "Block1Exam failed to start" with icon stop
+    with title "McGoverner failed to start" with icon stop
 end run
 APPLESCRIPT
 }
@@ -84,12 +84,12 @@ fetch_code() {
 # active development. A distributed, downloaded copy (what real end users get,
 # sitting in ~/Downloads with no surrounding repo) won't match anything here.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$HOME/Block1Exam"
+INSTALL_DIR="$HOME/McGoverner"
 IS_DEV_CHECKOUT=0
 dir="$SCRIPT_DIR"
 for _ in 1 2 3 4 5 6; do
   dir="$(dirname "$dir")"
-  if [ -d "$dir/.git" ] && git -C "$dir" remote get-url origin 2>/dev/null | grep -q "Block1Exam"; then
+  if [ -d "$dir/.git" ] && git -C "$dir" remote get-url origin 2>/dev/null | grep -qi "mcgoverner"; then
     INSTALL_DIR="$dir"
     IS_DEV_CHECKOUT=1
     echo "Running from a local checkout ($INSTALL_DIR) — using it in place."
@@ -108,7 +108,7 @@ if [ "$IS_DEV_CHECKOUT" -eq 1 ]; then
   fi
 else
   if ! fetch_code; then
-    show_error "Could not download Block1Exam. Check your internet connection — a corporate VPN or firewall blocking/intercepting github.com will also cause this."
+    show_error "Could not download McGoverner. Check your internet connection — a corporate VPN or firewall blocking/intercepting github.com will also cause this."
     exit 1
   fi
 fi
@@ -133,7 +133,7 @@ for _ in $(seq 1 120); do
 done
 
 if [ "$started" -eq 0 ]; then
-  show_error "Block1Exam didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
+  show_error "McGoverner didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
   # Don't leave a hung install/server stuck running in the background after
   # telling the user it failed - kill it (and its direct children) so the app
   # actually quits instead of "staying open" indefinitely with nothing to show.

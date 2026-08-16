@@ -15,7 +15,7 @@ import app.scheduler as sched
 
 init_db()
 
-app = FastAPI(title="Block1 Exam Prep")
+app = FastAPI(title="McGoverner")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

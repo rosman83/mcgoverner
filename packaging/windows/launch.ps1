@@ -1,15 +1,15 @@
 # Windows counterpart of packaging/launch.sh. Wrapped into a double-clickable,
-# no-visible-window launcher by Block1Exam.bat. Job: get the latest code onto
+# no-visible-window launcher by McGoverner.bat. Job: get the latest code onto
 # the machine (no git required - see Fetch-Code), hand off to run.ps1 (which
 # owns dependency install and starting the server), then open the browser once
 # it actually answers. Re-running this (relaunching the shortcut) is the
 # auto-update: it re-downloads the tracked branch every time.
 $ErrorActionPreference = 'Stop'
 
-$RepoBranch = "rashid/vision-fallback-and-config"   # everyone tracks this branch, not main
-$ZipUrl = "https://github.com/redfluff20/Block1Exam/archive/refs/heads/$RepoBranch.zip"
-$InstallDir = Join-Path $env:USERPROFILE "Block1Exam"
-$RunLog = Join-Path $env:TEMP "block1exam-run.log"
+$RepoBranch = "main"
+$ZipUrl = "https://github.com/rosman83/mcgoverner/archive/refs/heads/$RepoBranch.zip"
+$InstallDir = Join-Path $env:USERPROFILE "McGoverner"
+$RunLog = Join-Path $env:TEMP "mcgoverner-run.log"
 
 # Every failure path used to just... end, with nothing visible for someone who
 # doesn't know to go digging in %TEMP% for a log file. Show a real dialog with
@@ -25,7 +25,7 @@ function Show-Error([string]$Message) {
     }
     [System.Windows.Forms.MessageBox]::Show(
         "$Message`n`n$detail",
-        "Block1Exam failed to start",
+        "McGoverner failed to start",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
     ) | Out-Null
@@ -36,7 +36,7 @@ function Show-Error([string]$Message) {
 # with every Windows 10/11 install, so this never depends on anything the user
 # would need to set up first.
 function Fetch-Code {
-    $tmp = Join-Path $env:TEMP ("block1exam-dl-" + [guid]::NewGuid())
+    $tmp = Join-Path $env:TEMP ("mcgoverner-dl-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $zipPath = Join-Path $tmp "repo.zip"
     try {
@@ -80,7 +80,7 @@ function Fetch-Code {
 }
 
 if (-not (Fetch-Code)) {
-    Show-Error "Could not download Block1Exam. Check your internet connection - a corporate VPN or firewall blocking/intercepting github.com will also cause this."
+    Show-Error "Could not download McGoverner. Check your internet connection - a corporate VPN or firewall blocking/intercepting github.com will also cause this."
     exit 1
 }
 
@@ -107,7 +107,7 @@ for ($i = 0; $i -lt 120; $i++) {
 }
 
 if (-not $started) {
-    Show-Error "Block1Exam didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
+    Show-Error "McGoverner didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
     # Don't leave a hung install/server running in the background after
     # telling the user it failed.
     if (-not $proc.HasExited) {

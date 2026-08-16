@@ -1,4 +1,4 @@
-# Block 1 Exam Prep
+# McGoverner
 
 A UWorld-style, lecture-anchored practice engine for medical school block exams. Built from your actual lecture slides — not generic question banks, not Anki.
 

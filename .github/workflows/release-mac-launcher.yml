@@ -1,13 +1,13 @@
 name: Release Mac launcher
 
-# Rebuilds Block1Exam.app whenever the launcher itself changes and republishes
-# it to a rolling "mac-launcher-latest" release. The .app only clones/pulls
+# Rebuilds McGoverner.app whenever the launcher itself changes and republishes
+# it to a rolling "launcher-latest" release. The .app only clones/pulls
 # REPO_BRANCH (packaging/launch.sh) at runtime — it doesn't bundle the app's
 # actual code — so this only needs to run when the launcher mechanism changes,
 # not on every commit.
 on:
   push:
-    branches: [rashid/vision-fallback-and-config]
+    branches: [main]
     paths: ["packaging/**"]
   workflow_dispatch: {}
 
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Block1Exam.app
+      - name: Build McGoverner.app
         run: |
           cd packaging
           ./build_app.sh
@@ -28,15 +28,15 @@ jobs:
       - name: Zip app bundle
         run: |
           cd packaging
-          ditto -c -k --keepParent Block1Exam.app Block1Exam.app.zip
+          ditto -c -k --keepParent McGoverner.app McGoverner.app.zip
 
       - name: Publish rolling release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: mac-launcher-latest
-          name: Block1Exam Launchers
+          tag_name: launcher-latest
+          name: McGoverner Launchers
           make_latest: "true"
-          files: packaging/Block1Exam.app.zip
+          files: packaging/McGoverner.app.zip
           # See release-windows-launcher.yml for why body isn't set here -
           # the two workflows share this release tag and neither should
           # clobber the notes the other (or a manual edit) already wrote.
