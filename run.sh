@@ -22,7 +22,24 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-[ -d .venv ] || uv venv .venv --quiet
+# Pin the interpreter explicitly instead of letting uv pick whatever's already
+# on PATH. The code uses `str | None`-style unions (needs 3.10+), and macOS's
+# own /usr/bin/python3 stub is stuck on 3.9.6 - it never gets updated, and a
+# python.org install doesn't help either, since the launcher runs in a
+# non-login shell that never sourced the profile that put it on PATH. `--python
+# 3.12` makes uv use its own managed interpreter regardless of any of that.
+# Also rebuild if an old run already created a venv against the wrong one.
+MIN_PY_MINOR=10
+venv_python_ok() {
+  [ -x .venv/bin/python ] || return 1
+  minor="$(.venv/bin/python -c 'import sys; print(sys.version_info[1])' 2>/dev/null)" || return 1
+  [ "$minor" -ge "$MIN_PY_MINOR" ]
+}
+if [ -d .venv ] && ! venv_python_ok; then
+  echo "Existing .venv is on too old a Python — rebuilding it."
+  rm -rf .venv
+fi
+[ -d .venv ] || uv venv .venv --python 3.12 --quiet
 uv pip install --python .venv/bin/python --quiet -r requirements.txt
 
 if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
