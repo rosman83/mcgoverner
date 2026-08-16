@@ -396,7 +396,11 @@ async function loadLearnList() {
   for (const l of lectures) {
     const row = document.createElement("div");
     row.className = "lecture-row";
-    const status = l.summary_status === "done" ? "summary ready" : l.summary_status;
+    const statusLabels = {
+      done: "summary ready", generating: "processing...", error: "processing failed",
+      not_started: "processing...",
+    };
+    const status = statusLabels[l.summary_status] || "processing...";
     const tag = l.tag || "foundations";
     row.innerHTML = `
       <div class="row-main">
