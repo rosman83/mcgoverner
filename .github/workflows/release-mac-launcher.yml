@@ -1,0 +1,50 @@
+name: Release Mac launcher
+
+# Rebuilds Block1Exam.app whenever the launcher itself changes and republishes
+# it to a rolling "mac-launcher-latest" release. The .app only clones/pulls
+# REPO_BRANCH (packaging/launch.sh) at runtime — it doesn't bundle the app's
+# actual code — so this only needs to run when the launcher mechanism changes,
+# not on every commit.
+on:
+  push:
+    branches: [rashid/vision-fallback-and-config]
+    paths: ["packaging/**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Block1Exam.app
+        run: |
+          cd packaging
+          ./build_app.sh
+
+      - name: Zip app bundle
+        run: |
+          cd packaging
+          ditto -c -k --keepParent Block1Exam.app Block1Exam.app.zip
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-launcher-latest
+          name: Block1Exam Mac Launcher
+          make_latest: "true"
+          files: packaging/Block1Exam.app.zip
+          body: |
+            Double-click launcher for macOS. No terminal needed after the first launch.
+
+            1. Download `Block1Exam.app.zip` below and unzip it.
+            2. Right-click the app → **Open** (only needed once — this bypasses macOS's
+               "unidentified developer" warning; a plain double-click will refuse to run it
+               the first time).
+            3. It opens your browser to the app automatically. Every future launch re-checks
+               for updates on its own — just reopen the app, no reinstalling.
+
+            Requires an API key on first run — the app will walk you to the Settings page for it.
