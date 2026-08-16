@@ -71,36 +71,55 @@ async function loadSettings() {
   renderSettingsFields(cfg.fields);
 }
 
-function renderSettingsFields(fields) {
-  const el = $("settings-fields");
-  el.innerHTML = fields.map((f) => {
-    const statusLine = f.secret
-      ? `<div class="${f.set ? "status-set" : "help"}">${f.set ? `Set (${f.display})` : "Not set"}</div>`
-      : "";
-    const inputValue = f.secret ? "" : escapeHtml(f.display);
-    const placeholder = f.secret && f.set ? "Enter a new key to replace it" : "";
+function settingsFieldHTML(f) {
+  if (f.type === "bool") {
     return `
-      <div class="settings-field">
-        <label for="cfg-${f.name}">${escapeHtml(f.label)}</label>
-        <input id="cfg-${f.name}" type="${f.secret ? "password" : "text"}"
-               value="${inputValue}" placeholder="${placeholder}" autocomplete="off">
-        ${statusLine}
+      <div class="settings-field settings-field-bool">
+        <label for="cfg-${f.name}">
+          <input id="cfg-${f.name}" type="checkbox" ${f.value ? "checked" : ""}>
+          ${escapeHtml(f.label)}
+        </label>
         <div class="help">${escapeHtml(f.help)}</div>
       </div>`;
-  }).join("");
+  }
+  const isSecret = f.type === "secret";
+  const statusLine = isSecret
+    ? `<div class="${f.set ? "status-set" : "help"}">${f.set ? `Set (${f.display})` : "Not set"}</div>`
+    : "";
+  const inputValue = isSecret ? "" : escapeHtml(f.display);
+  const placeholder = isSecret && f.set ? "Enter a new key to replace it" : "";
+  return `
+    <div class="settings-field">
+      <label for="cfg-${f.name}">${escapeHtml(f.label)}</label>
+      <input id="cfg-${f.name}" type="${isSecret ? "password" : "text"}"
+             value="${inputValue}" placeholder="${placeholder}" autocomplete="off">
+      ${statusLine}
+      <div class="help">${escapeHtml(f.help)}</div>
+    </div>`;
+}
+
+function renderSettingsFields(fields) {
+  const primary = fields.filter((f) => !f.advanced);
+  const advanced = fields.filter((f) => f.advanced);
+  $("settings-fields").innerHTML = primary.map(settingsFieldHTML).join("");
+  $("settings-advanced-fields").innerHTML = advanced.map(settingsFieldHTML).join("");
 }
 
 async function saveSettings() {
   const statusEl = $("settings-status");
-  const inputs = $("settings-fields").querySelectorAll("input");
   const updates = {};
-  inputs.forEach((inp) => {
+  document.querySelectorAll("#settings-fields input, #settings-advanced-fields input").forEach((inp) => {
     const name = inp.id.replace(/^cfg-/, "");
-    // Secret fields start blank (never pre-filled with the masked value) - only
-    // send one if the user actually typed a replacement.
-    if (inp.type !== "password" || inp.value) updates[name] = inp.value;
+    if (inp.type === "checkbox") {
+      updates[name] = inp.checked ? "true" : "false";
+    } else if (inp.type !== "password" || inp.value) {
+      // Secret fields start blank (never pre-filled with the masked value) -
+      // only send one if the user actually typed a replacement.
+      updates[name] = inp.value;
+    }
   });
   statusEl.textContent = "Saving...";
+  statusEl.classList.remove("error");
   try {
     const cfg = await fetch("/api/config", {
       method: "POST",
@@ -110,10 +129,16 @@ async function saveSettings() {
     state.configured = cfg.configured;
     $("settings-gate-banner").hidden = cfg.configured;
     renderSettingsFields(cfg.fields);
-    statusEl.textContent = cfg.configured ? "Saved." : "Saved, but no API key is set yet.";
-    if (cfg.configured) refreshUsage();
+    if (cfg.error) {
+      statusEl.textContent = cfg.error;
+      statusEl.classList.add("error");
+    } else {
+      statusEl.textContent = cfg.configured ? "Saved." : "Saved, but no API key is set yet.";
+      if (cfg.configured) refreshUsage();
+    }
   } catch (e) {
     statusEl.textContent = "Save failed: " + e.message;
+    statusEl.classList.add("error");
   }
 }
 

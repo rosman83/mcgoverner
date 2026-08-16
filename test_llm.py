@@ -111,40 +111,36 @@ def test_usage_is_recorded():
 
 
 def test_provider_switch():
-    for var in ("LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL",
-                "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"):
+    for var in ("USE_DEEPSEEK_FOR_TEXT", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):
         os.environ.pop(var, None)
 
-    os.environ["LLM_PROVIDER"] = "openrouter"
-    assert C.active_model() == ("openrouter", "deepseek/deepseek-chat")
-    assert "openrouter" in C._provider()["base_url"]
+    # Default for everyone: OpenRouter with the one fixed model. Computing
+    # this doesn't need a key present, only calling it does.
+    assert C.active_model() == ("openrouter", C.DEFAULT_MODEL)
 
-    os.environ["LLM_PROVIDER"] = "deepseek"
-    assert C.active_model() == ("deepseek", "deepseek-chat")
+    # DeepSeek only kicks in with BOTH the toggle AND the key - either alone
+    # still means OpenRouter.
+    os.environ["DEEPSEEK_API_KEY"] = "x"
+    assert C.active_model() == ("openrouter", C.DEFAULT_MODEL)
+    os.environ["USE_DEEPSEEK_FOR_TEXT"] = "true"
+    assert C.active_model() == ("deepseek", C.DEEPSEEK_MODEL)
+    del os.environ["DEEPSEEK_API_KEY"]
+    assert C.active_model() == ("openrouter", C.DEFAULT_MODEL), \
+        "toggle on but no key must fall back to openrouter, not crash"
 
-    os.environ["LLM_MODEL"] = "some-other-model"
-    assert C.active_model()[1] == "some-other-model"
-    del os.environ["LLM_MODEL"]
-
-    # Unknown provider falls back to whichever key is present.
-    os.environ["LLM_PROVIDER"] = "nonsense"
-    os.environ.pop("DEEPSEEK_API_KEY", None)
-    os.environ["OPENROUTER_API_KEY"] = "x"
-    assert C.active_model()[0] == "openrouter"
-    del os.environ["OPENROUTER_API_KEY"]
-    os.environ["LLM_PROVIDER"] = "deepseek"
+    os.environ.pop("USE_DEEPSEEK_FOR_TEXT", None)
 
 
 def test_missing_key_names_the_right_var():
     C.get_client = _REAL_GET_CLIENT
-    os.environ["LLM_PROVIDER"] = "openrouter"
     os.environ.pop("OPENROUTER_API_KEY", None)
+    os.environ.pop("USE_DEEPSEEK_FOR_TEXT", None)
+    os.environ.pop("DEEPSEEK_API_KEY", None)
     try:
         C.get_client()
         assert False, "should have raised"
     except RuntimeError as e:
         assert "OPENROUTER_API_KEY" in str(e), str(e)
-    os.environ["LLM_PROVIDER"] = "deepseek"
 
 
 def test_captions_batch_into_one_call():

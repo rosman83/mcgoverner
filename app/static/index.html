@@ -200,7 +200,7 @@
   <!-- SETTINGS -->
   <section id="view-settings" class="view">
     <div id="settings-gate-banner" class="config-banner" hidden>
-      Set an API key below to start generating summaries and questions.
+      Add your OpenRouter key below to start generating summaries and questions.
     </div>
     <div class="panel">
       <h3>API configuration</h3>
@@ -209,6 +209,10 @@
         saving on this page writes back to the same <code>.env</code>, so both stay in sync.
       </p>
       <div id="settings-fields"></div>
+      <details class="settings-advanced">
+        <summary>Advanced</summary>
+        <div id="settings-advanced-fields"></div>
+      </details>
       <div class="settings-actions">
         <button id="settings-save" class="btn">Save</button>
         <span id="settings-status" class="muted"></span>

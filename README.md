@@ -198,7 +198,7 @@ app/
     questionsets.py professor question handouts → questions (bypasses slides)
     concepts.py    slide coverage stats
   llm/
-    client.py      provider client (DeepSeek direct / OpenRouter, OpenAI-compatible)
+    client.py      OpenRouter client (DeepSeek direct as an advanced opt-in for text)
     summaries.py   condensed lecture summaries
     captions.py    batched image captions from OCR text
   sessiongen.py    slide-anchored MCQ generation (the question engine)
@@ -211,24 +211,20 @@ data/block1.db     local database
 
 ## API keys & providers
 
-DeepSeek is billed direct. OpenRouter is a single OpenAI-compatible gateway for
-everything else (alternate text models, and the vision fallback below) — one key
-instead of a separate subscription per provider:
+Everyone needs one key: `OPENROUTER_API_KEY`. It powers everything — questions,
+summaries, captions, and image descriptions — through one fixed model
+(`google/gemini-3.7-flash`, multimodal, so text and vision use the same model).
+No provider/model picking; the Settings page just asks for this one key, with
+real validation against OpenRouter's key-info endpoint on save (catches a bad
+key or a provisioning/management key pasted by mistake immediately, rather
+than failing confusingly on the first real generation call).
 
-| Provider | Key env var | Default model |
-|---|---|---|
-| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
-| `openrouter` | `OPENROUTER_API_KEY` | `deepseek/deepseek-chat` |
-
-Set `LLM_PROVIDER=deepseek|openrouter` to choose; if unset, whichever key is present wins.
-Override the model with `LLM_MODEL`, or the endpoint with `LLM_BASE_URL`.
-`run.sh` auto-loads `.env`; you can also `export` the vars manually.
-
-**Vision fallback:** slides with images but little/no OCR text (research-paper figures,
-anatomy diagrams) get described by an OpenRouter vision model (`OPENROUTER_VISION_MODEL`,
-default `google/gemini-2.0-flash-001`), independent of your `LLM_PROVIDER` choice above.
-Set `OPENROUTER_API_KEY` even if your text provider is DeepSeek, or image-only slides
-stay thin. Without it, they're silently skipped (same as OCR always was).
+**Advanced, optional:** if you already have DeepSeek credit, set
+`USE_DEEPSEEK_FOR_TEXT=true` plus `DEEPSEEK_API_KEY` (both required together)
+to use DeepSeek direct for text generation instead of OpenRouter. Image
+descriptions always go through OpenRouter regardless — DeepSeek has no vision
+model. This lives under "Advanced" on the Settings page, not the main flow.
+`run.sh`/`run.ps1` auto-load `.env`; you can also `export` the vars manually.
 
 ## Token usage
 

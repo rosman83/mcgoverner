@@ -8,61 +8,49 @@ from openai import OpenAI
 
 load_dotenv()
 
-# Vision fallback for slides whose images carry no readable OCR text (research-paper
-# figures, anatomy diagrams). Always routed through OpenRouter, independent of whichever
-# text PROVIDERS entry is active — vision needs a vision-capable model regardless of
-# which provider is answering text prompts.
-VISION_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_VISION_MODEL = "google/gemini-2.0-flash-001"
+# Everyone defaults to OpenRouter + one fixed model, for both text and vision -
+# no per-user provider/model picking anymore. This model is multimodal (text +
+# image in one call), so text generation and the vision fallback both use it;
+# that also means there's a real path later to fold vision straight into the
+# question/summary prompts instead of a separate captioning pass, though
+# that's not done here - this change is just the provider/config simplification.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_MODEL = "google/gemini-3.7-flash"
 
-# DeepSeek is billed direct. OpenRouter is a single OpenAI-compatible gateway to
-# everything else (alternate text models, and the vision fallback below) — one key
-# instead of a separate subscription per provider.
-PROVIDERS = {
-    "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-        "key_env": "DEEPSEEK_API_KEY",
-    },
-    "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "model": "deepseek/deepseek-chat",
-        "key_env": "OPENROUTER_API_KEY",
-    },
-}
+# Advanced, opt-in, TEXT-ONLY override for people who already have DeepSeek
+# credit to use up (see app/config.py for the toggle + migration). Vision
+# always goes through OpenRouter regardless - DeepSeek has no vision model.
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 
-def _provider():
-    """Resolve the active provider. LLM_PROVIDER picks it; if unset, whichever key
-    is present wins (DeepSeek first, for backwards compatibility)."""
-    name = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    if name not in PROVIDERS:
-        name = "deepseek" if os.environ.get("DEEPSEEK_API_KEY") else (
-            "openrouter" if os.environ.get("OPENROUTER_API_KEY") else "deepseek"
-        )
-    p = dict(PROVIDERS[name], name=name)
-    # Per-provider overrides, plus the legacy DEEPSEEK_* names.
-    p["base_url"] = os.environ.get("LLM_BASE_URL") or os.environ.get("DEEPSEEK_BASE_URL") or p["base_url"]
-    p["model"] = os.environ.get("LLM_MODEL") or os.environ.get("DEEPSEEK_MODEL") or p["model"]
-    return p
+def _use_deepseek_for_text():
+    enabled = (os.environ.get("USE_DEEPSEEK_FOR_TEXT") or "").strip().lower() in ("1", "true", "yes")
+    return enabled and bool(os.environ.get("DEEPSEEK_API_KEY"))
 
 
 def active_model():
-    p = _provider()
-    return p["name"], p["model"]
+    if _use_deepseek_for_text():
+        return "deepseek", DEEPSEEK_MODEL
+    return "openrouter", DEFAULT_MODEL
 
 
 def get_client():
-    p = _provider()
-    api_key = os.environ.get(p["key_env"])
-    if not api_key:
-        raise RuntimeError(
-            f"{p['key_env']} not set for provider '{p['name']}'. Add it to .env, e.g. "
-            f"{p['key_env']}=sk-..."
-        )
+    if _use_deepseek_for_text():
+        # _use_deepseek_for_text() already requires DEEPSEEK_API_KEY to be set
+        # to return True, so it's guaranteed present here.
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        base_url = DEEPSEEK_BASE_URL
+    else:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY not set. Add it in Settings — get one at openrouter.ai/keys."
+            )
+        base_url = OPENROUTER_BASE_URL
     # max_retries=0: chat_json owns retry policy. The SDK default (2) multiplies with
     # it, turning one logical call into up to 9 billed requests.
-    return OpenAI(api_key=api_key, base_url=p["base_url"], max_retries=0, timeout=180)
+    return OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=180)
 
 
 def _record_usage(resp, kind, provider_name=None, model_name=None):
@@ -80,9 +68,9 @@ def _record_usage(resp, kind, provider_name=None, model_name=None):
         from app.db import get_conn
 
         if provider_name is None or model_name is None:
-            p = _provider()
-            provider_name = provider_name or p["name"]
-            model_name = model_name or p["model"]
+            name, model = active_model()
+            provider_name = provider_name or name
+            model_name = model_name or model
         conn = get_conn()
         conn.execute(
             "INSERT INTO api_usage(provider, model, kind, prompt_tokens, cached_tokens, "
@@ -96,6 +84,25 @@ def _record_usage(resp, kind, provider_name=None, model_name=None):
         print(f"usage logging failed: {e}")
 
 
+def _friendly_api_error(e):
+    """Re-raise API errors with an actionable message instead of a raw SDK
+    exception - 'error code 401' means nothing to a non-technical user, but
+    'your OpenRouter key looks invalid or has run out of credit' does."""
+    msg = str(e)
+    status = getattr(e, "status_code", None)
+    if status == 401 or "401" in msg:
+        return RuntimeError(
+            "The API key was rejected (401). It may be invalid, revoked, or the wrong "
+            "kind of key - check it in Settings."
+        )
+    if status == 402 or "402" in msg or "credit" in msg.lower() or "insufficient" in msg.lower():
+        return RuntimeError(
+            "The API request was rejected for billing (402) - the account is likely out "
+            "of credit. Add more at openrouter.ai (or platform.deepseek.com) and try again."
+        )
+    return e
+
+
 def chat(prompt, system=None, temperature=0.7, max_tokens=2000, json_mode=False, kind=None):
     client = get_client()
     messages = []
@@ -103,14 +110,17 @@ def chat(prompt, system=None, temperature=0.7, max_tokens=2000, json_mode=False,
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     kwargs = dict(
-        model=_provider()["model"],
+        model=active_model()[1],
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    resp = client.chat.completions.create(**kwargs)
+    try:
+        resp = client.chat.completions.create(**kwargs)
+    except Exception as e:
+        raise _friendly_api_error(e)
     _record_usage(resp, kind)
     return resp.choices[0].message.content.strip()
 
@@ -146,30 +156,31 @@ def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, 
 
 
 def describe_image(image_path, prompt, max_tokens=500, kind="vision"):
-    """Describe a local image via an OpenRouter vision model. Returns the model's
-    text reply, or "" if OPENROUTER_API_KEY is unset (vision fallback is optional,
-    not required)."""
+    """Describe a local image via OpenRouter. Returns the model's text reply, or
+    "" if OPENROUTER_API_KEY is unset (vision fallback is optional, not required)."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         return ""
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     ext = os.path.splitext(image_path)[1].lstrip(".").lower() or "jpeg"
-    model = os.environ.get("OPENROUTER_VISION_MODEL") or DEFAULT_VISION_MODEL
-    client = OpenAI(api_key=api_key, base_url=VISION_BASE_URL, max_retries=0, timeout=180)
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64}"}},
-            ],
-        }],
-        max_tokens=max_tokens,
-        temperature=0.3,
-    )
-    _record_usage(resp, kind, provider_name="openrouter-vision", model_name=model)
+    client = OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL, max_retries=0, timeout=180)
+    try:
+        resp = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64}"}},
+                ],
+            }],
+            max_tokens=max_tokens,
+            temperature=0.3,
+        )
+    except Exception as e:
+        raise _friendly_api_error(e)
+    _record_usage(resp, kind, provider_name="openrouter", model_name=DEFAULT_MODEL)
     return resp.choices[0].message.content.strip()
 
 

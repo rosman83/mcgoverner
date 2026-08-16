@@ -510,7 +510,13 @@ input[type="file"] { max-width: 100%; }
 .settings-field input, .settings-field select { display: block; width: 100%; max-width: 420px; }
 .settings-field .help { font-size: 14px; color: var(--muted); margin-top: 2px; }
 .settings-field .status-set { color: var(--green, #2a9d5c); font-size: 14px; margin-top: 2px; }
+.settings-field-bool label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.settings-field-bool input[type="checkbox"] { width: auto; margin: 0; }
+.settings-advanced { margin: 4px 0 18px; }
+.settings-advanced summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: 15px; }
+.settings-advanced #settings-advanced-fields { margin-top: 14px; padding-left: 2px; }
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+#settings-status.error { color: var(--red); font-weight: 600; }
 
 /* Dashboard detail */
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
