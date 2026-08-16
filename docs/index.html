@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block1 Exam Prep — Get Started</title>
+<style>
+  :root {
+    --orange: #B74C19;
+    --blue: #1a5fb4;
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #e5e2dd;
+    --panel: #f6f3ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 60px 24px 80px;
+  }
+  .head { text-align: center; }
+  .logo {
+    max-height: 96px;
+    max-width: 130px;
+    width: auto;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .tagline {
+    color: var(--orange);
+    font-weight: 600;
+    font-size: 15px;
+    margin-top: 18px;
+    letter-spacing: 0.1px;
+  }
+  .contact {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  .contact a {
+    color: var(--blue);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .contact a:hover { text-decoration: underline; }
+
+  .steps { margin-top: 52px; }
+  .step {
+    display: flex;
+    gap: 18px;
+    padding: 30px 0;
+    border-top: 1px solid var(--border);
+  }
+  .step:first-child { border-top: none; padding-top: 0; }
+  .num {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--orange);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-top: 2px;
+  }
+  .step-body { flex: 1; min-width: 0; }
+  .step h2 {
+    margin: 2px 0 10px;
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .step p {
+    margin: 0 0 10px;
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .step p:last-child { margin-bottom: 0; }
+  .step code {
+    background: var(--panel);
+    color: var(--orange);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+  }
+  .note {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .note strong { color: var(--orange); }
+
+  .downloads { display: flex; gap: 10px; flex-wrap: wrap; }
+  .dl-btn {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 18px;
+    border-radius: 9px;
+    background: var(--ink);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .dl-btn:hover { background: var(--orange); }
+  .dl-btn svg { width: 18px; height: 18px; flex: none; }
+
+  .key-list { margin: 0; padding: 0; list-style: none; }
+  .key-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 11px 0;
+    border-top: 1px dashed var(--border);
+    font-size: 15px;
+  }
+  .key-list li:first-child { border-top: none; padding-top: 0; }
+  .key-list a { color: var(--blue); font-weight: 600; text-decoration: none; }
+  .key-list a:hover { text-decoration: underline; }
+  .price {
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--orange);
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  footer {
+    margin-top: 56px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <img class="logo" src="https://medicalschoolhq.net/wp-content/uploads/2019/01/McGovern-at-University-of-Texas-Houston-Secondary-Application-836x1024.png" alt="McGovern Medical School">
+      <div class="tagline">Made for M1 year at McGovern MS</div>
+      <div class="contact">
+        Contact <a href="mailto:rashid.osman@uth.tmc.edu">Rashid</a> and <a href="mailto:eshan.manchanda@uth.tmc.edu">Eshan</a> for inquiries
+      </div>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <div class="step-body">
+          <h2>Download</h2>
+          <p>Pick your platform — it downloads right away, nothing else to install first.</p>
+          <div class="downloads">
+            <a class="dl-btn" href="https://github.com/redfluff20/Block1Exam/releases/download/mac-launcher-latest/Block1Exam.app.zip">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.24-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.336-1.32-3.428-2.88-1.24-1.75-2.222-4.49-2.222-7.08 0-4.14 2.66-6.34 5.27-6.34 1.32 0 2.44.89 3.29.89.82 0 2.11-.94 3.55-.94.57 0 2.6.05 3.95 1.97-.1.07-2.35 1.37-2.35 4.15 0 3.31 2.9 4.44 2.94 4.46z"/></svg>
+              macOS
+            </a>
+            <a class="dl-btn" href="https://github.com/redfluff20/Block1Exam/releases/download/mac-launcher-latest/Block1Exam-Windows.zip">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg>
+              Windows
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">2</div>
+        <div class="step-body">
+          <h2>Open it</h2>
+          <p><strong>Mac:</strong> unzip, then right-click the app → <code>Open</code> (only the first time — this bypasses macOS's "unidentified developer" warning; a plain double-click will refuse to run it once).</p>
+          <p><strong>Windows:</strong> unzip, keep both files together, then double-click <code>Block1Exam.bat</code>. If SmartScreen warns you, click <code>More info → Run anyway</code>.</p>
+          <p>Your browser opens on its own once it's ready.</p>
+          <p class="note"><strong>Always reopen this same app</strong> to launch it. That's how your data stays put and updates arrive automatically — downloading a fresh copy each time starts you over.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">3</div>
+        <div class="step-body">
+          <h2>Add two API keys</h2>
+          <p>The app takes you straight to a Settings page for this. You need both keys below — leave everything else on that page blank.</p>
+          <ul class="key-list">
+            <li><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">DeepSeek key</a><span class="price">$5 recommended</span></li>
+            <li><a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter key</a><span class="price">$5 recommended</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <footer>Block1 Exam Prep</footer>
+  </div>
+</body>
+</html>
