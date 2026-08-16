@@ -60,6 +60,16 @@
     margin-top: 18px;
     letter-spacing: 0.1px;
   }
+  .quote {
+    margin: 10px auto 0;
+    max-width: 440px;
+    padding-left: 14px;
+    border-left: 3px solid var(--orange);
+    color: var(--muted);
+    font-size: 14px;
+    font-style: italic;
+    text-align: left;
+  }
   .contact {
     color: var(--muted);
     font-size: 14px;
@@ -175,7 +185,14 @@
     text-align: center;
     color: var(--muted);
     font-size: 13px;
+    line-height: 1.8;
   }
+  footer a {
+    color: var(--blue);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -183,15 +200,26 @@
     <div class="head">
       <div class="avatars">
         <div class="person">
-          <svg class="hat" viewBox="0 0 64 40" aria-hidden="true"><ellipse cx="32" cy="30" rx="30" ry="7" fill="#4a2f1c"/><path d="M15 27 Q15 8 32 8 Q49 8 49 27 Z" fill="#5c3a21"/><rect x="15" y="21" width="34" height="5" fill="#B74C19"/></svg>
+          <svg class="hat" viewBox="0 0 64 44" aria-hidden="true">
+            <path d="M2 32 Q10 40 32 40 Q54 40 62 32 Q54 36 32 36 Q10 36 2 32 Z" fill="#C89B4A"/>
+            <path d="M16 30 Q16 10 32 10 Q48 10 48 30 Z" fill="#D9AE5C"/>
+            <rect x="16" y="24" width="32" height="6" fill="#7A4A24"/>
+            <polygon points="32,19 33.18,22.38 36.76,22.45 33.90,24.62 34.94,28.04 32,26 29.06,28.04 30.10,24.62 27.24,22.45 30.82,22.38" fill="#FFD54A" stroke="#B8860B" stroke-width="0.6"/>
+          </svg>
           <img class="avatar" src="assets/rashid.jpg" alt="Rashid">
         </div>
         <div class="person">
-          <svg class="hat" viewBox="0 0 64 40" aria-hidden="true"><ellipse cx="32" cy="30" rx="30" ry="7" fill="#4a2f1c"/><path d="M15 27 Q15 8 32 8 Q49 8 49 27 Z" fill="#5c3a21"/><rect x="15" y="21" width="34" height="5" fill="#B74C19"/></svg>
+          <svg class="hat" viewBox="0 0 64 44" aria-hidden="true">
+            <path d="M2 32 Q10 40 32 40 Q54 40 62 32 Q54 36 32 36 Q10 36 2 32 Z" fill="#C89B4A"/>
+            <path d="M16 30 Q16 10 32 10 Q48 10 48 30 Z" fill="#D9AE5C"/>
+            <rect x="16" y="24" width="32" height="6" fill="#7A4A24"/>
+            <polygon points="32,19 33.18,22.38 36.76,22.45 33.90,24.62 34.94,28.04 32,26 29.06,28.04 30.10,24.62 27.24,22.45 30.82,22.38" fill="#FFD54A" stroke="#B8860B" stroke-width="0.6"/>
+          </svg>
           <img class="avatar" src="assets/eshan.jpg" alt="Eshan">
         </div>
       </div>
       <div class="tagline">Made for M1 year at McGovern MS</div>
+      <blockquote class="quote">Upload lecture slides, generate exam level question sets, check coverage of slides by topic for 100% mastery.</blockquote>
       <div class="contact">
         Contact <a href="mailto:rashid.osman@uth.tmc.edu">Rashid</a> and <a href="mailto:eshan.manchanda@uth.tmc.edu">Eshan</a> for inquiries
       </div>
@@ -241,7 +269,10 @@
       </div>
     </div>
 
-    <footer>McGoverner</footer>
+    <footer>
+      McGoverner<br>
+      Code publicly available on <a href="https://github.com/rosman83/mcgoverner" target="_blank" rel="noopener">GitHub</a>, under rosman83/mcgoverner
+    </footer>
   </div>
 </body>
 </html>
