@@ -16,6 +16,7 @@ function initTheme() {
 
 let state = {
   view: "dashboard",
+  configured: true, // optimistic until initConfigGate() checks; avoids a flash on load
   lectureId: null,
   sessionId: null,
   optionSelected: false,
@@ -30,22 +31,26 @@ let state = {
 
 // ---------- Navigation ----------
 document.querySelectorAll("nav button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    switchView(btn.dataset.view);
-  });
+  btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
 
 function switchView(view) {
+  // No API key yet: every nav click lands back on Settings instead of a view
+  // that can't do anything without one.
+  if (!state.configured && view !== "settings") {
+    view = "settings";
+    toast("Add an API key in Settings first");
+  }
   if (state.view === "drill" && view !== "drill") pauseActiveQuiz();
   state.view = view;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   $("view-" + view).classList.add("active");
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   if (view === "dashboard") loadDashboard();
   if (view === "learn") loadLearnList();
   if (view === "drill") loadDrill();
   if (view === "progress") loadProgress();
+  if (view === "settings") loadSettings();
 }
 
 // ---------- Toast ----------
@@ -56,6 +61,68 @@ function toast(msg) {
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+// ---------- Settings ----------
+async function loadSettings() {
+  const cfg = await fetch("/api/config").then((r) => r.json());
+  state.configured = cfg.configured;
+  $("settings-gate-banner").hidden = cfg.configured;
+  renderSettingsFields(cfg.fields);
+}
+
+function renderSettingsFields(fields) {
+  const el = $("settings-fields");
+  el.innerHTML = fields.map((f) => {
+    const statusLine = f.secret
+      ? `<div class="${f.set ? "status-set" : "help"}">${f.set ? `Set (${f.display})` : "Not set"}</div>`
+      : "";
+    const inputValue = f.secret ? "" : escapeHtml(f.display);
+    const placeholder = f.secret && f.set ? "Enter a new key to replace it" : "";
+    return `
+      <div class="settings-field">
+        <label for="cfg-${f.name}">${escapeHtml(f.label)}</label>
+        <input id="cfg-${f.name}" type="${f.secret ? "password" : "text"}"
+               value="${inputValue}" placeholder="${placeholder}" autocomplete="off">
+        ${statusLine}
+        <div class="help">${escapeHtml(f.help)}</div>
+      </div>`;
+  }).join("");
+}
+
+async function saveSettings() {
+  const statusEl = $("settings-status");
+  const inputs = $("settings-fields").querySelectorAll("input");
+  const updates = {};
+  inputs.forEach((inp) => {
+    const name = inp.id.replace(/^cfg-/, "");
+    // Secret fields start blank (never pre-filled with the masked value) - only
+    // send one if the user actually typed a replacement.
+    if (inp.type !== "password" || inp.value) updates[name] = inp.value;
+  });
+  statusEl.textContent = "Saving...";
+  try {
+    const cfg = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    }).then((r) => r.json());
+    state.configured = cfg.configured;
+    $("settings-gate-banner").hidden = cfg.configured;
+    renderSettingsFields(cfg.fields);
+    statusEl.textContent = cfg.configured ? "Saved." : "Saved, but no API key is set yet.";
+    if (cfg.configured) refreshUsage();
+  } catch (e) {
+    statusEl.textContent = "Save failed: " + e.message;
+  }
+}
+
+$("settings-save").addEventListener("click", saveSettings);
+
+async function initConfigGate() {
+  const cfg = await fetch("/api/config").then((r) => r.json()).catch(() => ({ configured: true }));
+  state.configured = cfg.configured;
+  if (!cfg.configured) switchView("settings");
 }
 
 // ---------- Dashboard ----------
@@ -1570,7 +1637,11 @@ async function refreshUsage() {
 
 // ---------- Init ----------
 initTheme();
-loadDashboard();
-loadQuestionSetLectures();
-refreshUsage();
-setInterval(refreshUsage, 60000);
+initConfigGate().then(() => {
+  if (state.configured) {
+    loadDashboard();
+    loadQuestionSetLectures();
+  }
+  refreshUsage();
+  setInterval(refreshUsage, 60000);
+});

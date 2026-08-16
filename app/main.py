@@ -346,6 +346,18 @@ def api_lecture_questions(lid: int, level: str = None):
 
 
 # ---------- API usage ----------
+@app.get("/api/config")
+def api_get_config():
+    from app.config import current_config
+    return current_config()
+
+
+@app.post("/api/config")
+def api_save_config(body: dict):
+    from app.config import save_config
+    return save_config(body)
+
+
 @app.get("/api/usage")
 def api_usage():
     """Token spend, so the cost of a session is visible instead of invisible."""

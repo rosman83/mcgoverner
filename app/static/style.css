@@ -496,6 +496,22 @@ input[type="file"] { max-width: 100%; }
 
 .muted { color: var(--muted); font-size: 15px; margin-top: 8px; }
 
+/* Settings */
+.config-banner {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  font-size: 16px;
+}
+.settings-field { margin-bottom: 18px; }
+.settings-field label { display: block; font-weight: 600; margin-bottom: 2px; }
+.settings-field input, .settings-field select { display: block; width: 100%; max-width: 420px; }
+.settings-field .help { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.settings-field .status-set { color: var(--green, #2a9d5c); font-size: 14px; margin-top: 2px; }
+.settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
 /* Dashboard detail */
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }

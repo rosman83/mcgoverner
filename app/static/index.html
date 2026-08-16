@@ -14,6 +14,7 @@
     <button data-view="learn">Learn</button>
     <button data-view="drill">Drill</button>
     <button data-view="progress">Progress</button>
+    <button data-view="settings">Settings</button>
   </nav>
   <div id="usage-chip" class="usage-chip" title="API tokens used today">
     <span id="usage-model" class="usage-model">-</span>
@@ -194,6 +195,25 @@
       <div id="saved-recommendations" class="rec-wrap"></div>
     </div>
     <div id="progress-body"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="view-settings" class="view">
+    <div id="settings-gate-banner" class="config-banner" hidden>
+      Set an API key below to start generating summaries and questions.
+    </div>
+    <div class="panel">
+      <h3>API configuration</h3>
+      <p class="muted">
+        Values already set in your <code>.env</code> file show up here automatically —
+        saving on this page writes back to the same <code>.env</code>, so both stay in sync.
+      </p>
+      <div id="settings-fields"></div>
+      <div class="settings-actions">
+        <button id="settings-save" class="btn">Save</button>
+        <span id="settings-status" class="muted"></span>
+      </div>
+    </div>
   </section>
 </main>
 

@@ -9,7 +9,7 @@
 set -uo pipefail
 
 REPO_URL="https://github.com/redfluff20/Block1Exam.git"
-REPO_BRANCH="main"   # point this at a different branch to track it instead
+REPO_BRANCH="rashid/vision-fallback-and-config"   # everyone tracks this branch, not main
 INSTALL_DIR="$HOME/Block1Exam"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
