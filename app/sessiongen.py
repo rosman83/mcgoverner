@@ -73,6 +73,10 @@ E. Increased renal calcium reabsorption
 
 BATCH_SIZE = 8  # slides per API call in batched generation
 
+# Everything above {slides} is byte-identical across batches, so providers with prompt
+# caching (DeepSeek direct, or whatever OpenRouter routes to) bill this ~900-token
+# prefix at the cache rate after the first call. Keep the variable slide text LAST —
+# any variable text placed earlier voids the cache for everything after it.
 QUESTION_BATCH_PROMPT = """Write NBME/USMLE-style single-best-answer questions for a medical student.
 
 You are given {count} slides. Return EXACTLY {count} questions - on average one per slide.
@@ -89,9 +93,6 @@ RULES:
 3. Backfill anchors MUST be genuinely testable content slides (slides with concrete biomedical facts). Summary, review, thank-you, and "Questions?" slides are non-testable and must NEVER be used as anchors, even as a last resort. If no testable slide is available to anchor an extra question, return fewer than {count} questions rather than writing a weak, meta, or summary-style question.
 4. Each question must be board-style and self-contained: a clinical vignette or mechanism prompt requiring 2nd-3rd order reasoning. Never reference "this slide", "the slide above", the lecture, or any unseen material.
 5. Do not name specific diseases, drugs, enzymes, or proteins that are not explicitly named in the slide the question is anchored to.
-
-SLIDES:
-{slides}
 
 EXAM STYLE REFERENCE:
 {examples}
@@ -110,7 +111,10 @@ Return ONLY JSON:
 }}
 
 - slide_index must be an index from 0 to {count_minus_1} (the slide's position in this batch); it may repeat.
-- Exactly 5 options per question. correct_index must be 0-4."""
+- Exactly 5 options per question. correct_index must be 0-4.
+
+SLIDES:
+{slides}"""
 
 
 def _strip_letter_prefix(text):
@@ -140,32 +144,69 @@ def _valid_stem(stem):
 
 SLIDE_WEIGHT_ALPHA = 0.6  # how strongly low-question slides are preferred over randomness
 
+# How much a slide's learning state changes its odds of being picked. The old weighting
+# only counted how many questions had been GENERATED for a slide — it had no idea
+# whether you actually knew it, so a session spent most of its questions re-testing
+# slides you had already got right while slides you had never seen waited their turn.
+# Nothing is ever excluded, so sessions stay unpredictable and mastered slides still
+# come round for reinforcement, just far less often.
+WEIGHT_UNSEEN = 3.0     # never answered — coverage first
+WEIGHT_MISSED = 2.0     # last answer was wrong — you owe this one
+WEIGHT_KNOWN = 0.35     # last answer was right — light reinforcement only
+
 
 def _slide_weights(pool):
-    """Weight each slide inversely by how many questions have been generated from it.
-    weight = 1 / (1 + q_count) ** alpha. Slides with no questions are most likely;
-    nothing is ever excluded, so selection stays unpredictable."""
+    """Weight each slide by how many questions exist for it AND whether you know it.
+    weight = 1/(1+q_count)^alpha × (unseen | missed | known multiplier)."""
     if not pool:
         return [], []
     conn = get_conn()
     ph = ",".join("?" * len(pool))
+    ids = tuple(s["slide_id"] for s in pool)
     rows = conn.execute(
         f"SELECT slide_id, COUNT(*) c FROM questions "
         f"WHERE slide_id IN ({ph}) GROUP BY slide_id",
-        tuple(s["slide_id"] for s in pool),
+        ids,
+    ).fetchall()
+    counts = {r["slide_id"]: r["c"] for r in rows}
+    # Most recent answer per slide: 1 = you got it right last time, 0 = you missed it,
+    # absent = never answered.
+    last = conn.execute(
+        f"SELECT q.slide_id, "
+        f"  (SELECT a2.correct FROM answers a2 JOIN questions q2 ON q2.id = a2.question_id "
+        f"   WHERE q2.slide_id = q.slide_id ORDER BY a2.answered_at DESC, a2.id DESC "
+        f"   LIMIT 1) AS last_correct "
+        f"FROM questions q WHERE q.slide_id IN ({ph}) GROUP BY q.slide_id",
+        ids,
     ).fetchall()
     conn.close()
-    counts = {r["slide_id"]: r["c"] for r in rows}
+    last_correct = {r["slide_id"]: r["last_correct"] for r in last}
+
     weights = []
     for s in pool:
         q = counts.get(s["slide_id"], 0)
-        weights.append(1.0 / ((1 + q) ** SLIDE_WEIGHT_ALPHA))
+        weights.append(
+            (1.0 / ((1 + q) ** SLIDE_WEIGHT_ALPHA))
+            * mastery_multiplier(last_correct.get(s["slide_id"]))
+        )
     return pool, weights
 
 
-def _weighted_sample_without_replacement(pool, weights, k):
+def mastery_multiplier(last_correct):
+    """Picking priority from a slide's most recent answer (None = never answered)."""
+    if last_correct is None:
+        return WEIGHT_UNSEEN
+    return WEIGHT_KNOWN if last_correct else WEIGHT_MISSED
+
+
+def _weighted_sample_without_replacement(pool, weights, k, rng=random):
     """Sample k distinct items, each picked with probability proportional to its
-    weight (re-weighted after each pick). Preserves low-question bias + randomness."""
+    weight (re-weighted after each pick). Preserves low-question bias + randomness.
+
+    `rng` defaults to the global random module, but the projection passes its own seeded
+    instance — otherwise the simulation is driven by unseeded randomness and the estimate
+    changes on every page load.
+    """
     pool = list(pool)
     weights = list(weights)
     out = []
@@ -173,7 +214,7 @@ def _weighted_sample_without_replacement(pool, weights, k):
         total = sum(weights)
         if total <= 0:
             break
-        r = random.random() * total
+        r = rng.random() * total
         cum = 0.0
         for i, w in enumerate(weights):
             cum += w
@@ -342,6 +383,7 @@ def _gen_batch(batch):
         system=QUESTION_SYSTEM,
         temperature=0.7,
         max_tokens=min(8000, 500 + 700 * len(batch)),
+        kind="questions",
     )
     out = []
     for q in result.get("questions") or []:
@@ -374,6 +416,33 @@ def generate_questions_for_slides(slides, batch_size=BATCH_SIZE, max_workers=4):
     return out
 
 
+# Share of a practice session filled from professor-authored questions when enough of
+# them exist. They are the highest-signal material available (real course questions beat
+# anything generated from a slide) AND they are free — every one used is one not paid for.
+PROFESSOR_MIX = 0.4
+
+
+def select_professor_questions(lecture_ids=None, k=0):
+    """Pick up to k professor-imported questions for the chosen lectures, preferring
+    ones answered least often so the finite bank rotates instead of repeating."""
+    if k <= 0:
+        return []
+    conn = get_conn()
+    where = "q.source='professor'"
+    params = []
+    if lecture_ids:
+        where += " AND q.lecture_id IN (" + ",".join("?" * len(lecture_ids)) + ")"
+        params.extend(lecture_ids)
+    rows = conn.execute(
+        f"SELECT q.id, COUNT(a.id) times_answered FROM questions q "
+        f"LEFT JOIN answers a ON a.question_id = q.id "
+        f"WHERE {where} GROUP BY q.id ORDER BY times_answered ASC, RANDOM() LIMIT ?",
+        (*params, k),
+    ).fetchall()
+    conn.close()
+    return [r["id"] for r in rows]
+
+
 QUIZ_SECONDS_PER_QUESTION = 90  # 1.5 min per question in quiz mode
 
 
@@ -384,43 +453,73 @@ def quiz_time_limit_min(question_count):
 
 
 def create_practice_session(lecture_ids=None, target=MAX_QUESTIONS, time_mode="tutor"):
-    """Create a practice session: pick slides, generate fresh questions, store them.
-    Returns (session_id, question_count). lecture_ids: list of lectures to draw
-    from (None/empty = all)."""
+    """Create a practice session: mix in professor-authored questions, generate the
+    rest from slides, store them.
+    Returns (session_id, question_count, error). On failure nothing is persisted and
+    `error` explains why. lecture_ids: list of lectures to draw from (None/empty = all)."""
     if target > MAX_QUESTIONS:
         target = MAX_QUESTIONS
+
+    # Professor questions come first and are free; only the shortfall is generated.
+    prof_ids = select_professor_questions(lecture_ids, int(target * PROFESSOR_MIX))
+    target_generated = target - len(prof_ids)
 
     used_ids = []
     questions = []
     rounds = 0
-    while len(questions) < target and rounds < 4:
+    saw_slides = False
+    # Top-up rounds are capped at 2 and abandoned as soon as one stops helping. The old
+    # 4-round loop kept re-generating against a shortfall that is usually structural
+    # (non-testable slides get skipped by design), paying for up to 4x the questions
+    # actually wanted. A slightly short session beats a silently expensive one.
+    while len(questions) < target_generated and rounds < 2:
         rounds += 1
-        need = target - len(questions)
+        need = target_generated - len(questions)
         slides = select_slides(lecture_ids=lecture_ids, target=need, exclude_slide_ids=used_ids)
         if not slides:
             break
+        saw_slides = True
         used_ids.extend(s["slide_id"] for s in slides)
-        questions.extend(generate_questions_for_slides(slides))
+        got = generate_questions_for_slides(slides)
+        if not got:
+            break
+        questions.extend(got)
 
     # Trim any overshoot (e.g. backfill produced extra anchored questions).
-    if len(questions) > target:
+    if len(questions) > target_generated:
         random.shuffle(questions)
-        questions = questions[:target]
+        questions = questions[:target_generated]
+
+    total = len(questions) + len(prof_ids)
+    if total == 0:
+        # Never persist an empty session — it shows up in "Past sessions" as a
+        # resumable "Practice (0 questions)" and hides the actual problem.
+        if not saw_slides:
+            reason = (
+                "These lectures have no readable slides. Import a PDF/PPTX on the "
+                "Dashboard first (a lecture with 0 slides cannot produce questions)."
+            )
+        else:
+            reason = (
+                "Question generation failed — every batch errored. Check the server "
+                "log and that your API key is valid and has credit."
+            )
+        return None, 0, reason
 
     tutor = time_mode != "quiz"
-    time_limit = 0 if tutor else quiz_time_limit_min(len(questions))
+    time_limit = 0 if tutor else quiz_time_limit_min(total)
     first_lecture = lecture_ids[0] if lecture_ids else None
 
     conn = get_conn()
     cur = conn.execute(
         "INSERT INTO sessions(title, status, mode, target_count, lecture_id, gen_status, "
         "tutor_mode, time_limit_min) VALUES(?, 'active', 'practice', ?, ?, 'done', ?, ?)",
-        (f"Practice ({len(questions)} questions)", len(questions), first_lecture,
-         tutor, time_limit),
+        (f"Practice ({total} questions)", total, first_lecture, tutor, time_limit),
     )
     sid = cur.lastrowid
-    random.shuffle(questions)
-    for i, q in enumerate(questions):
+
+    qids = list(prof_ids)   # professor questions already exist; generated ones are new rows
+    for q in questions:
         cur2 = conn.execute(
             "INSERT INTO questions(lecture_id, slide_id, question, options, "
             "correct_index, explanation, level, source) VALUES(?,?,?,?,?,?,?, 'session')",
@@ -434,14 +533,17 @@ def create_practice_session(lecture_ids=None, target=MAX_QUESTIONS, time_mode="t
                 "recall",
             ),
         )
-        qid = cur2.lastrowid
+        qids.append(cur2.lastrowid)
+
+    random.shuffle(qids)
+    for i, qid in enumerate(qids):
         conn.execute(
             "INSERT INTO session_questions(session_id, question_id, position) VALUES(?,?,?)",
             (sid, qid, i),
         )
     conn.commit()
     conn.close()
-    return sid, len(questions)
+    return sid, len(qids), None
 
 
 def create_review_session(lecture_ids=None, time_mode="tutor"):

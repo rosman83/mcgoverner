@@ -89,6 +89,95 @@ async def api_import_lectures(files: list[UploadFile] = File(...)):
     return {"imported": imported, "errors": errors, "duplicates": duplicates}
 
 
+@app.post("/api/question_sets/import")
+async def api_import_question_set(
+    lecture_id: int = Form(...), files: list[UploadFile] = File(...)
+):
+    """Import a professor's practice-question handout as real questions attached to a
+    lecture. These bypass the slide pipeline entirely — see ingest/questionsets.py."""
+    from app.ingest.questionsets import import_question_set
+
+    conn = get_conn()
+    lec = conn.execute("SELECT id FROM lectures WHERE id=?", (lecture_id,)).fetchone()
+    conn.close()
+    if not lec:
+        raise HTTPException(404, "Lecture not found")
+
+    upload_dir = os.path.join(os.path.dirname(DB_PATH), "..", "lectures")
+    os.makedirs(upload_dir, exist_ok=True)
+    imported = dupes = 0
+    errors = []
+    for f in files:
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in (".pdf", ".pptx"):
+            errors.append(f"{f.filename}: unsupported (use .pdf or .pptx)")
+            continue
+        dest = os.path.join(upload_dir, f.filename)
+        with open(dest, "wb") as out:
+            out.write(await f.read())
+        try:
+            res = import_question_set(dest, lecture_id)
+            imported += res["imported"]
+            dupes += res["skipped_duplicates"]
+        except Exception as e:
+            errors.append(f"{f.filename}: {e}")
+    return {"imported": imported, "skipped_duplicates": dupes, "errors": errors}
+
+
+LECTURE_TAGS = ("foundations", "doctoring", "anatomy")
+
+
+MAX_WEEK = 52
+
+
+class LectureUpdate(BaseModel):
+    # `x: int = None` is NOT optional in pydantic v2 — the default is None but the type
+    # stays strict, so sending null 422s. `| None` is what makes "clear the week" work.
+    title: str | None = None
+    tag: str | None = None
+    week: int | None = None
+
+
+@app.patch("/api/lectures/{lid}")
+def api_update_lecture(lid: int, body: LectureUpdate):
+    """Rename, retag, and/or set the course week. All fields optional; only what's
+    sent changes. Sending week=null clears it."""
+    fields, params = [], []
+    if body.title is not None:
+        title = " ".join(body.title.split())[:200]   # collapse pasted whitespace/newlines
+        if not title:
+            raise HTTPException(400, "Title cannot be empty")
+        fields.append("title=?")
+        params.append(title)
+    if body.tag is not None:
+        if body.tag not in LECTURE_TAGS:
+            raise HTTPException(400, f"Tag must be one of {', '.join(LECTURE_TAGS)}")
+        fields.append("tag=?")
+        params.append(body.tag)
+    # model_fields_set distinguishes "week omitted" from "week: null" (clear it).
+    if "week" in body.model_fields_set:
+        if body.week is not None and not (1 <= body.week <= MAX_WEEK):
+            raise HTTPException(400, f"Week must be between 1 and {MAX_WEEK}")
+        fields.append("week=?")
+        params.append(body.week)
+    if not fields:
+        raise HTTPException(400, "Nothing to update")
+
+    conn = get_conn()
+    cur = conn.execute(
+        f"UPDATE lectures SET {', '.join(fields)} WHERE id=?", (*params, lid)
+    )
+    conn.commit()
+    if not cur.rowcount:
+        conn.close()
+        raise HTTPException(404, "Lecture not found")
+    row = conn.execute(
+        "SELECT id, title, tag, week FROM lectures WHERE id=?", (lid,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
 @app.post("/api/lectures/{lid}/dedupe")
 def api_dedupe_lecture(lid: int):
     from app.ingest.duplicates import detect_duplicate, _lecture_text
@@ -127,6 +216,27 @@ def api_lecture_deck(lid: int):
     return out
 
 
+@app.get("/api/lectures/{lid}/slide/{num}")
+def api_lecture_slide(lid: int, num: int):
+    """One slide by its number — backs the expandable footnotes in summaries and
+    question explanations."""
+    from app.ingest.images import images_for_slides
+
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT s.id, s.slide_num, s.text, s.caption, s.ocr_text, l.title AS lecture_title "
+        "FROM slides s JOIN lectures l ON l.id=s.lecture_id "
+        "WHERE s.lecture_id=? AND s.slide_num=?",
+        (lid, num),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Slide not found")
+    d = dict(row)
+    d["images"] = images_for_slides([d["id"]])
+    return d
+
+
 @app.get("/api/lectures/{lid}/images")
 def api_lecture_images(lid: int):
     from app.ingest.images import images_for_lecture
@@ -150,7 +260,10 @@ def api_ocr_lecture(lid: int):
         run_ocr_for_lecture(lid)
         try:
             from app.llm.captions import generate_captions_for_lecture
-            generate_captions_for_lecture(lid, force=True)
+            # force=False: OCR is deterministic, so re-running it usually yields the
+            # same text and existing captions stay valid. The /captions route is the
+            # explicit "regenerate everything" path.
+            generate_captions_for_lecture(lid, force=False)
         except Exception as e:
             print(f"caption generation failed for lecture {lid}: {e}")
 
@@ -230,6 +343,88 @@ def api_lecture_questions(lid: int, level: str = None):
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------- API usage ----------
+@app.get("/api/usage")
+def api_usage():
+    """Token spend, so the cost of a session is visible instead of invisible."""
+    from app.llm.client import active_model
+
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt, "
+        "COALESCE(SUM(cached_tokens),0) cached, COALESCE(SUM(completion_tokens),0) completion "
+        "FROM api_usage WHERE date(created_at)=date('now')"
+    ).fetchone()
+    total = conn.execute(
+        "SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt, "
+        "COALESCE(SUM(cached_tokens),0) cached, COALESCE(SUM(completion_tokens),0) completion "
+        "FROM api_usage"
+    ).fetchone()
+    by_kind = conn.execute(
+        "SELECT kind, COUNT(*) calls, COALESCE(SUM(prompt_tokens+completion_tokens),0) tokens "
+        "FROM api_usage WHERE date(created_at)=date('now') GROUP BY kind ORDER BY tokens DESC"
+    ).fetchall()
+    conn.close()
+
+    provider, model = active_model()
+
+    def shape(r):
+        prompt = r["prompt"]
+        return {
+            "calls": r["calls"],
+            "prompt_tokens": prompt,
+            "cached_tokens": r["cached"],
+            "completion_tokens": r["completion"],
+            "total_tokens": prompt + r["completion"],
+            "cache_hit_pct": round(100.0 * r["cached"] / prompt, 1) if prompt else 0.0,
+        }
+
+    return {
+        "provider": provider,
+        "model": model,
+        "today": shape(row),
+        "all_time": shape(total),
+        "today_by_kind": [dict(r) for r in by_kind],
+    }
+
+
+# ---------- Mastery projection ----------
+@app.get("/api/mastery_projection")
+def api_mastery_projection():
+    """Simulated questions still needed to master every slide. Recomputed each call,
+    so it tracks your accuracy as it changes."""
+    from app.projection import mastery_projection
+    return mastery_projection()
+
+
+# ---------- Study recommendations ----------
+@app.post("/api/sessions/{sid}/recommendations")
+def api_generate_recommendations(sid: int, force: bool = False):
+    """Analyse this session's mistakes into saved study guidance (one API call, cached
+    in the database — regenerating only happens with force=true)."""
+    from app.llm.recommendations import generate_recommendations
+    try:
+        rec = generate_recommendations(sid, force=force)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    if not rec:
+        return {"recommendations": None, "message": "No mistakes in this session."}
+    return {"recommendations": rec}
+
+
+@app.get("/api/sessions/{sid}/recommendations")
+def api_get_recommendations(sid: int):
+    from app.llm.recommendations import get_recommendations
+    return {"recommendations": get_recommendations(sid)}
+
+
+@app.get("/api/recommendations")
+def api_recent_recommendations(limit: int = 10):
+    """Saved guidance across sessions — the running record of what to work on."""
+    from app.llm.recommendations import recent_recommendations
+    return recent_recommendations(limit)
 
 
 # ---------- Coverage / Dashboard ----------
@@ -326,10 +521,13 @@ def api_create_session(
     lids = lecture_ids if lecture_ids else ([lecture_id] if lecture_id else None)
     if mode == "review":
         sid, count = create_review_session(lecture_ids=lids, time_mode=time_mode)
+        reason = "Nothing to review yet — miss a question first and it lands here."
     else:
-        sid, count = create_practice_session(lecture_ids=lids, target=target, time_mode=time_mode)
+        sid, count, reason = create_practice_session(
+            lecture_ids=lids, target=target, time_mode=time_mode
+        )
     if count == 0:
-        return {"session_id": None, "question_count": 0, "message": "No questions generated"}
+        return {"session_id": None, "question_count": 0, "message": reason}
     return {"session_id": sid, "question_count": count}
 
 
@@ -349,6 +547,24 @@ def api_list_sessions():
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.delete("/api/sessions/{sid}")
+def api_delete_session(sid: int):
+    """Remove a session from the history.
+
+    Only the session and its question links go — the questions themselves, your answer
+    history, and anything tagged missed all survive, so clearing history never erases
+    what you have learned or what you still owe a review.
+    """
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+    conn.execute("DELETE FROM session_questions WHERE session_id=?", (sid,))
+    conn.commit()
+    conn.close()
+    if not cur.rowcount:
+        raise HTTPException(404, "Session not found")
+    return {"deleted": sid}
 
 
 @app.get("/api/sessions/{sid}")
@@ -376,7 +592,8 @@ def api_session_review(sid: int):
         raise HTTPException(404, "Session not found")
     rows = conn.execute(
         "SELECT q.id, q.question, q.options, q.correct_index, q.explanation, sq.answered, "
-        "a.selected_index, a.correct AS selected_correct, q.slide_id, "
+        "a.selected_index, a.correct AS selected_correct, q.slide_id, q.lecture_id, "
+        "q.source AS question_source, "
         "l.title AS lecture_title, s.slide_num, s.text AS slide_text, s.caption AS slide_caption "
         "FROM session_questions sq JOIN questions q ON q.id=sq.question_id "
         "LEFT JOIN lectures l ON l.id=q.lecture_id "
@@ -396,6 +613,74 @@ def api_session_review(sid: int):
     return {"session": dict(s), "questions": out}
 
 
+@app.get("/api/sessions/{sid}/nav")
+def api_session_nav(sid: int):
+    """One row per question in the session: position, whether it's answered, and how.
+    Drives the numbered strip that lets you jump back and fix a misclick."""
+    conn = get_conn()
+    s = conn.execute("SELECT id FROM sessions WHERE id=?", (sid,)).fetchone()
+    if not s:
+        conn.close()
+        raise HTTPException(404, "Session not found")
+    rows = conn.execute(
+        "SELECT sq.position, sq.question_id, sq.answered, "
+        "a.selected_index, a.correct "
+        "FROM session_questions sq "
+        "LEFT JOIN answers a ON a.question_id=sq.question_id AND a.session_id=? "
+        "WHERE sq.session_id=? ORDER BY sq.position",
+        (sid, sid),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+QUESTION_SELECT = (
+    "SELECT sq.*, q.question, q.options, q.correct_index, q.explanation, q.level, q.slide_id, "
+    "q.lecture_id, q.source AS question_source, "
+    "l.title AS source_lecture_title, "
+    "s.slide_num AS source_slide_num, s.text AS source_slide_text, "
+    "s.caption AS source_slide_caption, "
+    "a.selected_index AS prior_selected_index, a.correct AS prior_correct "
+    "FROM session_questions sq JOIN questions q ON q.id = sq.question_id "
+    "LEFT JOIN lectures l ON l.id = q.lecture_id "
+    "LEFT JOIN slides s ON s.id = q.slide_id "
+    "LEFT JOIN answers a ON a.question_id = q.id AND a.session_id = sq.session_id "
+)
+
+
+def _question_payload(row):
+    """Shape one question row for the drill UI (shared by /next and /question/{qid})."""
+    from app.ingest.images import images_for_slides
+
+    q = dict(row)
+    q["options"] = json.loads(q["options"])
+    q["id"] = q["question_id"]
+    q["source_images"] = images_for_slides([q["slide_id"]] if q.get("slide_id") else [])
+    q["source_slide"] = {
+        "lecture_id": q.get("lecture_id"),
+        "lecture_title": q.get("source_lecture_title") or "",
+        "slide_num": q.get("source_slide_num"),
+        "text": q.get("source_slide_text") or "",
+        "caption": q.get("source_slide_caption") or "",
+    }
+    return q
+
+
+@app.get("/api/sessions/{sid}/question/{question_id}")
+def api_session_question(sid: int, question_id: int):
+    """Load one specific question in a session, with the answer you gave (if any),
+    so you can revisit and change it mid-session."""
+    conn = get_conn()
+    row = conn.execute(
+        QUESTION_SELECT + "WHERE sq.session_id=? AND sq.question_id=?",
+        (sid, question_id),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Not in session")
+    return {"done": False, "question": _question_payload(row)}
+
+
 @app.get("/api/sessions/{sid}/next")
 def api_next_question(sid: int):
     conn = get_conn()
@@ -404,35 +689,33 @@ def api_next_question(sid: int):
         conn.close()
         raise HTTPException(404, "Session not found")
     row = conn.execute(
-        "SELECT sq.*, q.question, q.options, q.correct_index, q.explanation, q.level, q.slide_id, "
-        "l.title AS source_lecture_title, "
-        "s.slide_num AS source_slide_num, s.text AS source_slide_text, "
-        "s.caption AS source_slide_caption "
-        "FROM session_questions sq JOIN questions q ON q.id = sq.question_id "
-        "LEFT JOIN lectures l ON l.id = q.lecture_id "
-        "LEFT JOIN slides s ON s.id = q.slide_id "
-        "WHERE sq.session_id=? AND sq.answered=0 "
+        QUESTION_SELECT + "WHERE sq.session_id=? AND sq.answered=0 "
         "ORDER BY sq.position LIMIT 1",
         (sid,),
     ).fetchone()
     conn.close()
     if not row:
         return {"done": True}
-    q = dict(row)
-    q["options"] = json.loads(q["options"])
-    q["id"] = q["question_id"]
+    return {"done": False, "question": _question_payload(row)}
 
-    # Source material images: question -> slide directly (no concept indirection)
-    from app.ingest.images import images_for_slides
-    slide_ids = [q["slide_id"]] if q.get("slide_id") else []
-    q["source_images"] = images_for_slides(slide_ids)
-    q["source_slide"] = {
-        "lecture_title": q.get("source_lecture_title") or "",
-        "slide_num": q.get("source_slide_num"),
-        "text": q.get("source_slide_text") or "",
-        "caption": q.get("source_slide_caption") or "",
-    }
-    return {"done": False, "question": q}
+
+def _tag_missed(conn, qid, lecture_id):
+    """Mark a question as missed, keeping exactly one row per question.
+
+    The old `INSERT ... ON CONFLICT DO NOTHING` was a no-op guard — `missed` has no
+    unique constraint on question_id, so nothing ever conflicted and every miss after
+    the first added a duplicate row, inflating the "to review" count.
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cur = conn.execute(
+        "UPDATE missed SET resolved=0, last_wrong_at=? WHERE question_id=?", (now, qid)
+    )
+    if not cur.rowcount:
+        conn.execute(
+            "INSERT INTO missed(question_id, lecture_id, missed_at, resolved, last_wrong_at) "
+            "VALUES(?,?,?,0,?)",
+            (qid, lecture_id, now, now),
+        )
 
 
 class Answer(BaseModel):
@@ -468,7 +751,7 @@ def api_answer(sid: int, question_id: int, body: Answer):
     row = conn.execute(
         "SELECT q.question_id, q.answered, qs.correct_index, qs.explanation, qs.lecture_id "
         "FROM session_questions q JOIN questions qs ON qs.id = q.question_id "
-        "WHERE q.session_id=? AND q.question_id=? AND q.answered=0",
+        "WHERE q.session_id=? AND q.question_id=?",
         (sid, question_id),
     ).fetchone()
     if not row:
@@ -477,39 +760,39 @@ def api_answer(sid: int, question_id: int, body: Answer):
     qid = row["question_id"]
     correct = body.selected_index == row["correct_index"]
 
-    conn.execute(
-        "INSERT INTO answers(question_id, session_id, correct, selected_index) VALUES(?,?,?,?)",
-        (qid, sid, 1 if correct else 0, body.selected_index),
-    )
+    # Re-answering a question you already did (fixing a misclick) updates the existing
+    # row rather than stacking a second one, so accuracy reflects your latest answer
+    # and the progress count doesn't drift upward on every revision.
+    prior = conn.execute(
+        "SELECT id FROM answers WHERE session_id=? AND question_id=? ORDER BY id DESC LIMIT 1",
+        (sid, qid),
+    ).fetchone()
+    if prior:
+        conn.execute(
+            "UPDATE answers SET correct=?, selected_index=?, answered_at=datetime('now') "
+            "WHERE id=?",
+            (1 if correct else 0, body.selected_index, prior["id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO answers(question_id, session_id, correct, selected_index) VALUES(?,?,?,?)",
+            (qid, sid, 1 if correct else 0, body.selected_index),
+        )
+        conn.execute(
+            "UPDATE sessions SET completed_count = completed_count + 1 WHERE id=?", (sid,)
+        )
     conn.execute(
         "UPDATE session_questions SET answered=1 WHERE session_id=? AND question_id=?",
         (sid, qid),
     )
-    conn.execute(
-        "UPDATE sessions SET completed_count = completed_count + 1, updated_at=datetime('now') "
-        "WHERE id=?",
-        (sid,),
-    )
+    conn.execute("UPDATE sessions SET updated_at=datetime('now') WHERE id=?", (sid,))
 
     # Tag wrong answers as missed (resolved on next-day review)
     if not correct:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            "INSERT INTO missed(question_id, lecture_id, missed_at, resolved, last_wrong_at) "
-            "VALUES(?,?,?,0,?) "
-            "ON CONFLICT DO NOTHING",
-            (qid, row["lecture_id"], now, now),
-        )
-        conn.execute(
-            "UPDATE missed SET resolved=0, last_wrong_at=? WHERE question_id=?",
-            (now, qid),
-        )
+        _tag_missed(conn, qid, row["lecture_id"])
     else:
         # correct in a practice/review session -> mark resolved if it was missed
-        conn.execute(
-            "UPDATE missed SET resolved=1 WHERE question_id=? AND lecture_id=?",
-            (qid, row["lecture_id"]),
-        )
+        conn.execute("UPDATE missed SET resolved=1 WHERE question_id=?", (qid,))
 
     remaining = conn.execute(
         "SELECT COUNT(*) c FROM session_questions WHERE session_id=? AND answered=0",
@@ -524,6 +807,7 @@ def api_answer(sid: int, question_id: int, body: Answer):
         "correct_index": row["correct_index"],
         "explanation": row["explanation"],
         "remaining": remaining,
+        "revised": bool(prior),
     }
 
 
@@ -542,7 +826,6 @@ def api_timeout(sid: int):
         "WHERE sq.session_id=? AND sq.answered=0",
         (sid,),
     ).fetchall()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for r in rows:
         qid = r["question_id"]
         conn.execute(
@@ -553,15 +836,7 @@ def api_timeout(sid: int):
             "UPDATE session_questions SET answered=1 WHERE session_id=? AND question_id=?",
             (sid, qid),
         )
-        conn.execute(
-            "INSERT INTO missed(question_id, lecture_id, missed_at, resolved, last_wrong_at) "
-            "VALUES(?,?,?,0,?) ON CONFLICT DO NOTHING",
-            (qid, r["lecture_id"], now, now),
-        )
-        conn.execute(
-            "UPDATE missed SET resolved=0, last_wrong_at=? WHERE question_id=?",
-            (now, qid),
-        )
+        _tag_missed(conn, qid, r["lecture_id"])
     conn.execute(
         "UPDATE sessions SET completed_count = completed_count + ?, "
         "status='completed', updated_at=datetime('now') WHERE id=?",

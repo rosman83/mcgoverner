@@ -4,3 +4,4 @@ lectures/
 .env
 __pycache__/
 *.pyc
+packaging/Block1Exam.app/

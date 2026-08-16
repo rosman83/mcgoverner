@@ -74,6 +74,7 @@ def generate_summary(lecture_id, on_progress=None):
             system=SUMMARY_SYSTEM,
             temperature=0.3,
             max_tokens=4000,
+            kind="summary",
         )
     except Exception as e:
         conn = get_conn()

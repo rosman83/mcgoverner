@@ -15,6 +15,11 @@
     <button data-view="drill">Drill</button>
     <button data-view="progress">Progress</button>
   </nav>
+  <div id="usage-chip" class="usage-chip" title="API tokens used today">
+    <span id="usage-model" class="usage-model">-</span>
+    <span id="usage-tokens">-</span>
+    <span id="usage-cache" class="usage-cache"></span>
+  </div>
   <div class="theme-wrap">
     <select id="theme-select" title="Theme">
       <option value="light">Light</option>
@@ -40,11 +45,31 @@
         <div class="card"><div class="stat" id="stat-due">-</div><div class="label">To review</div></div>
       </div>
 
+      <div class="panel" id="projection-panel">
+        <h3>Projected work to full mastery</h3>
+        <div id="projection-body" class="muted">Calculating...</div>
+      </div>
+
       <div class="panel">
         <h3>Import lectures (PDF / PPTX)</h3>
         <input type="file" id="file-input" multiple accept=".pdf,.pptx">
         <button id="import-btn" class="btn">Import</button>
         <div id="import-result" class="muted"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Import professor practice questions (PDF / PPTX)</h3>
+        <p class="muted small">
+          Question handouts from your professor. These are parsed into real questions —
+          not slides — so they never affect slide coverage, cost nothing to reuse, and
+          are mixed into every practice session ahead of generated ones.
+        </p>
+        <label class="qs-row">Attach to lecture:
+          <select id="qs-lecture"></select>
+        </label>
+        <input type="file" id="qs-file-input" multiple accept=".pdf,.pptx">
+        <button id="qs-import-btn" class="btn">Import questions</button>
+        <div id="qs-import-result" class="muted"></div>
       </div>
 
       <div class="panel">
@@ -85,6 +110,7 @@
     <div id="learn-lecture-list"></div>
     <div id="learn-summary" hidden>
       <button id="learn-back" class="btn small">Back to lectures</button>
+      <button id="regen-summary-btn" class="btn small ghost" hidden>Regenerate summary</button>
       <div id="summary-status" class="muted"></div>
       <div id="summary-body"></div>
       <div id="key-points"></div>
@@ -163,6 +189,10 @@
 
   <!-- PROGRESS -->
   <section id="view-progress" class="view">
+    <div class="panel">
+      <h3>Saved recommendations</h3>
+      <div id="saved-recommendations" class="rec-wrap"></div>
+    </div>
     <div id="progress-body"></div>
   </section>
 </main>

@@ -3,7 +3,15 @@ import json
 import os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "block1.db")
+# BLOCK1_DB points the app at a different database — used to run the UI tests against a
+# throwaway copy instead of your real one.
+DB_PATH = os.environ.get("BLOCK1_DB") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "block1.db"
+)
+
+# sqlite cannot create the db file if its parent dir is missing (data/ is gitignored,
+# so a fresh clone has no data/ and get_conn fails with "unable to open database file").
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS lectures (
@@ -15,7 +23,9 @@ CREATE TABLE IF NOT EXISTS lectures (
     word_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     summary_status TEXT DEFAULT 'not_started',
-    ocr_status TEXT DEFAULT 'not_run'
+    ocr_status TEXT DEFAULT 'not_run',
+    tag TEXT DEFAULT 'foundations',     -- course strand: foundations | doctoring | anatomy
+    week INTEGER                        -- course week the lecture was given (NULL = untagged)
 );
 
 CREATE TABLE IF NOT EXISTS slides (
@@ -115,6 +125,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     tutor_mode INTEGER DEFAULT 1,
     time_limit_min INTEGER DEFAULT 0,
     gen_status TEXT DEFAULT 'ready',
+    elapsed_sec INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -133,6 +144,7 @@ CREATE TABLE IF NOT EXISTS answers (
     question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
     session_id INTEGER,
     correct INTEGER NOT NULL,
+    selected_index INTEGER,
     answered_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -142,6 +154,25 @@ CREATE TABLE IF NOT EXISTS session_questions (
     position INTEGER NOT NULL,
     answered INTEGER DEFAULT 0,
     PRIMARY KEY (session_id, question_id)
+);
+
+CREATE TABLE IF NOT EXISTS recommendations (
+    session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    themes TEXT,                        -- json: [{topic, why, action}]
+    summary TEXT,
+    mistake_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS api_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT,
+    model TEXT,
+    kind TEXT,                          -- 'questions' | 'summary' | 'caption'
+    prompt_tokens INTEGER DEFAULT 0,
+    cached_tokens INTEGER DEFAULT 0,    -- subset of prompt_tokens billed at cache rate
+    completion_tokens INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
 );
 """
 
@@ -155,6 +186,10 @@ def get_conn(db_path=None):
     return conn
 
 
+# Bump when you add a column/table to SCHEMA, and add the matching step in _migrate.
+SCHEMA_VERSION = 17
+
+
 def init_db():
     conn = get_conn()
     conn.executescript(SCHEMA)
@@ -163,98 +198,66 @@ def init_db():
     conn.close()
 
 
+# Columns that must exist on each table, whatever route the database took to get here.
+# SCHEMA and the old version-gated migrations had drifted apart (SCHEMA never gained
+# answers.selected_index or sessions.elapsed_sec), so a database built one way was
+# missing columns the other way had. Reconciling against this list every startup means
+# drift self-heals instead of surfacing as a 500 mid-session.
+EXPECTED_COLUMNS = {
+    "concepts": [
+        ("last_reviewed_at", "TEXT"),
+        ("accuracy", "REAL DEFAULT NULL"),
+    ],
+    "slides": [
+        ("ocr_text", "TEXT DEFAULT ''"),
+        ("caption", "TEXT DEFAULT ''"),
+    ],
+    "lectures": [
+        ("ocr_status", "TEXT DEFAULT 'not_run'"),
+        ("tag", "TEXT DEFAULT 'foundations'"),
+        ("week", "INTEGER"),
+    ],
+    "scheduler_state": [
+        ("learning_step", "INTEGER DEFAULT 0"),
+    ],
+    "sessions": [
+        ("tutor_mode", "INTEGER DEFAULT 1"),
+        ("time_limit_min", "INTEGER DEFAULT 0"),
+        ("gen_status", "TEXT DEFAULT 'ready'"),
+        ("elapsed_sec", "INTEGER DEFAULT 0"),
+    ],
+    "questions": [
+        ("slide_id", "INTEGER"),
+        ("source", "TEXT DEFAULT 'generated'"),
+    ],
+    "answers": [
+        ("selected_index", "INTEGER"),
+    ],
+}
+
+
 def _migrate(conn):
-    """Additive migrations. Each step only runs once, so existing data is never dropped.
-    Bump SCHEMA_VERSION when you add a new column/table to SCHEMA."""
-    SCHEMA_VERSION = 13
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version < 2:
-        # Add mastery tracking to concepts (safe additive column)
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(concepts)").fetchall()]
-        if "last_reviewed_at" not in cols:
-            conn.execute("ALTER TABLE concepts ADD COLUMN last_reviewed_at TEXT")
-        if "accuracy" not in cols:
-            conn.execute("ALTER TABLE concepts ADD COLUMN accuracy REAL DEFAULT NULL")
-    if version < 3:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS slide_images ("
-            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "  slide_id INTEGER NOT NULL REFERENCES slides(id) ON DELETE CASCADE,"
-            "  path TEXT NOT NULL,"
-            "  kind TEXT DEFAULT 'embedded',"
-            "  seq INTEGER DEFAULT 0,"
-            "  created_at TEXT DEFAULT (datetime('now'))"
-            ")"
-        )
-    if version < 4:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(slides)").fetchall()]
-        if "ocr_text" not in cols:
-            conn.execute("ALTER TABLE slides ADD COLUMN ocr_text TEXT DEFAULT ''")
-        conn.execute(
-            "ALTER TABLE lectures ADD COLUMN ocr_status TEXT DEFAULT 'not_run'"
-        )
-    if version < 5:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(slides)").fetchall()]
-        if "caption" not in cols:
-            conn.execute("ALTER TABLE slides ADD COLUMN caption TEXT DEFAULT ''")
-    if version < 6:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(scheduler_state)").fetchall()]
-        if "learning_step" not in cols:
-            conn.execute(
-                "ALTER TABLE scheduler_state ADD COLUMN learning_step INTEGER DEFAULT 0"
-            )
-    if version < 7:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS concept_details ("
-            "  concept_id INTEGER PRIMARY KEY REFERENCES concepts(id) ON DELETE CASCADE,"
-            "  detail TEXT,"
-            "  level TEXT DEFAULT 'recall'"
-            ")"
-        )
-    if version < 8:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-        if "tutor_mode" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN tutor_mode INTEGER DEFAULT 1")
-        if "time_limit_min" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN time_limit_min INTEGER DEFAULT 0")
-    if version < 9:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS missed ("
-            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "  question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,"
-            "  lecture_id INTEGER,"
-            "  missed_at TEXT DEFAULT (datetime('now')),"
-            "  resolved INTEGER DEFAULT 0,"
-            "  last_wrong_at TEXT"
-            ")"
-        )
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-        if "gen_status" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN gen_status TEXT DEFAULT 'ready'")
-    if version < 10:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(questions)").fetchall()]
-        if "slide_id" not in cols:
-            conn.execute("ALTER TABLE questions ADD COLUMN slide_id INTEGER")
-    if version < 11:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS answers ("
-            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "  question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,"
-            "  session_id INTEGER,"
-            "  correct INTEGER NOT NULL,"
-            "  answered_at TEXT DEFAULT (datetime('now'))"
-            ")"
-        )
-    if version < 12:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(answers)").fetchall()]
-        if "selected_index" not in cols:
-            conn.execute("ALTER TABLE answers ADD COLUMN selected_index INTEGER")
-    if version < 13:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-        if "elapsed_sec" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN elapsed_sec INTEGER DEFAULT 0")
+    """Reconcile the database with EXPECTED_COLUMNS. Purely additive: every step is
+    guarded, so this is safe to run on every startup and never drops data."""
+    existing_tables = {
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    added = []
+    for table, columns in EXPECTED_COLUMNS.items():
+        if table not in existing_tables:
+            continue
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, decl in columns:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                added.append(f"{table}.{name}")
+    if added:
+        print(f"db: added missing column(s): {', '.join(added)}")
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
+    return added
 
 
 def to_json(obj):

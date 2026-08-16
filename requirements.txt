@@ -1,0 +1,12 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+pymupdf==1.28.2
+python-pptx==1.0.2
+openai==3.0.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+
+# OCR via Apple's on-device Vision framework (macOS only, free).
+# Without these, slide-image OCR silently produces nothing and captions stay empty.
+pyobjc-framework-Vision==11.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==11.1; sys_platform == "darwin"

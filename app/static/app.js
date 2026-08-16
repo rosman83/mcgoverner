@@ -144,6 +144,7 @@ async function loadDashboard() {
 
     $("dash-loading").style.display = "none";
     $("dash-content").hidden = false;
+    loadProjection();
   } catch (e) {
     $("dash-loading").textContent = "Failed to load dashboard: " + e.message;
   }
@@ -171,12 +172,145 @@ $("import-btn").addEventListener("click", async () => {
     $("import-result").textContent = msg;
     toast(msg);
     loadDashboard();
+    loadQuestionSetLectures();
   } catch (e) {
     $("import-result").textContent = "Import failed: " + e.message;
   } finally {
     $("import-btn").disabled = false;
   }
 });
+
+// ---------- Professor question sets ----------
+function professorBadge(source) {
+  if (source !== "professor") return "";
+  return `<div class="prof-badge" title="Written by your professor, not generated from a slide">
+    ★ Professor-written question — high yield, expect this style on the exam
+  </div>`;
+}
+
+async function loadQuestionSetLectures() {
+  const sel = $("qs-lecture");
+  if (!sel) return;
+  const lectures = await fetch("/api/lectures").then((r) => r.json());
+  sel.innerHTML = lectures.length
+    ? lectures.map((l) => `<option value="${l.id}">${escapeHtml(l.title)}</option>`).join("")
+    : `<option value="">Import a lecture first</option>`;
+}
+
+$("qs-import-btn").addEventListener("click", async () => {
+  const files = $("qs-file-input").files;
+  const lectureId = $("qs-lecture").value;
+  if (!lectureId) return toast("Import a lecture first, then attach questions to it");
+  if (!files.length) return toast("Choose files first");
+  const fd = new FormData();
+  fd.append("lecture_id", lectureId);
+  for (const f of files) fd.append("files", f);
+  $("qs-import-btn").disabled = true;
+  $("qs-import-result").textContent = "Parsing questions (this makes API calls)...";
+  try {
+    const res = await fetch("/api/question_sets/import", { method: "POST", body: fd })
+      .then((r) => r.json());
+    let msg = `Imported ${res.imported} professor question(s).`;
+    if (res.skipped_duplicates) msg += ` Skipped ${res.skipped_duplicates} already imported.`;
+    if (res.errors.length) msg += " Errors: " + res.errors.join("; ");
+    $("qs-import-result").textContent = msg;
+    toast(msg);
+    loadDashboard();
+    refreshUsage();
+  } catch (e) {
+    $("qs-import-result").textContent = "Import failed: " + e.message;
+  } finally {
+    $("qs-import-btn").disabled = false;
+  }
+});
+
+// ---------- Lecture rename / retag ----------
+const LECTURE_TAGS = ["foundations", "doctoring", "anatomy"];
+
+async function saveLecture(id, patch) {
+  const res = await fetch(`/api/lectures/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Save failed");
+  }
+  return res.json();
+}
+
+function wireLectureEditing(row, l) {
+  const pill = row.querySelector(".tag-pill");
+  pill.addEventListener("change", async () => {
+    const prev = pill.dataset.tag;
+    try {
+      await saveLecture(l.id, { tag: pill.value });
+      pill.dataset.tag = pill.value;
+      l.tag = pill.value;
+      toast(`Tagged as ${pill.value}`);
+    } catch (e) {
+      pill.value = prev;   // keep the pill honest about what is stored
+      toast(e.message);
+    }
+  });
+
+  const week = row.querySelector(".week-input");
+  const commitWeek = async () => {
+    const raw = week.value.trim();
+    const next = raw === "" ? null : parseInt(raw, 10);
+    if (next === (l.week == null ? null : l.week)) return;
+    if (next !== null && (!Number.isInteger(next) || next < 1 || next > 52)) {
+      week.value = l.week == null ? "" : l.week;
+      return toast("Week must be between 1 and 52");
+    }
+    try {
+      const saved = await saveLecture(l.id, { week: next });
+      l.week = saved.week;
+      week.value = saved.week == null ? "" : saved.week;
+      week.closest(".week-pill").classList.toggle("unset", saved.week == null);
+      toast(saved.week == null ? "Week cleared" : `Tagged week ${saved.week}`);
+    } catch (e) {
+      week.value = l.week == null ? "" : l.week;
+      toast(e.message);
+    }
+  };
+  week.addEventListener("blur", commitWeek);
+  week.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); week.blur(); }
+    else if (e.key === "Escape") { week.value = l.week == null ? "" : l.week; week.blur(); }
+  });
+
+  const title = row.querySelector(".title");
+  const commit = async () => {
+    // textContent, so a name pasted from Canvas with markup stores as plain text.
+    const next = title.textContent.trim().replace(/\s+/g, " ");
+    if (!next || next === l.title) {
+      title.textContent = l.title;   // reject empty, revert no-op edits
+      return;
+    }
+    try {
+      const saved = await saveLecture(l.id, { title: next });
+      l.title = saved.title;
+      title.textContent = saved.title;
+      toast("Renamed");
+      loadQuestionSetLectures();     // the attach-to-lecture dropdown shows titles
+    } catch (e) {
+      title.textContent = l.title;
+      toast(e.message);
+    }
+  };
+  title.addEventListener("blur", commit);
+  title.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      title.blur();                  // Enter commits; newlines never enter the name
+    } else if (e.key === "Escape") {
+      title.textContent = l.title;
+      title.blur();
+    }
+  });
+}
 
 // ---------- Learn ----------
 async function loadLearnList() {
@@ -193,9 +327,22 @@ async function loadLearnList() {
     const row = document.createElement("div");
     row.className = "lecture-row";
     const status = l.summary_status === "done" ? "summary ready" : l.summary_status;
+    const tag = l.tag || "foundations";
     row.innerHTML = `
       <div class="row-main">
-        <div class="title">${escapeHtml(l.title)}</div>
+        <div class="title-line">
+          <select class="tag-pill" data-tag="${tag}" title="Course strand">
+            ${LECTURE_TAGS.map((t) =>
+              `<option value="${t}"${t === tag ? " selected" : ""}>${t}</option>`).join("")}
+          </select>
+          <span class="week-pill${l.week ? "" : " unset"}" title="Week this lecture was given">
+            <span class="week-label">Week</span>
+            <input class="week-input" type="number" min="1" max="52" placeholder="–"
+                   value="${l.week == null ? "" : l.week}">
+          </span>
+          <span class="title" contenteditable="plaintext-only" spellcheck="false"
+                title="Click to rename — saves automatically">${escapeHtml(l.title)}</span>
+        </div>
         <div class="meta">${l.slide_count} slides · ${l.word_count} words</div>
       </div>
       <div class="row-actions">
@@ -205,16 +352,20 @@ async function loadLearnList() {
         <button class="btn small ghost danger-text" id="del-${l.id}">Delete</button>
       </div>`;
     row.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
+      // Renaming or retagging must not also open the summary.
+      if (e.target.closest("button, .tag-pill, .title, .week-pill")) return;
       openSummary(l.id);
     });
+    wireLectureEditing(row, l);
     const ocr = row.querySelector(`#ocr-${l.id}`);
     ocr.addEventListener("click", async () => {
       ocr.disabled = true;
       ocr.textContent = "OCR running...";
       await fetch(`/api/lectures/${l.id}/ocr`, { method: "POST" });
-      toast("OCR + captions running in background — refresh in ~1 min");
-      setTimeout(() => { ocr.disabled = false; ocr.textContent = "OCR"; }, 3000);
+      toast("OCR + captions running in background — this can take a few minutes if slides need the vision fallback");
+      await pollOcrStatus(l.id);
+      ocr.disabled = false;
+      ocr.textContent = "OCR";
     });
     const cap = row.querySelector(`#cap-${l.id}`);
     cap.addEventListener("click", async () => {
@@ -235,6 +386,19 @@ async function loadLearnList() {
   }
 }
 
+// Poll until OCR (and its vision fallback) leaves the "running" state, instead of a
+// fixed timeout — the vision fallback's network calls mean this can now take minutes,
+// and re-enabling the button too early invited a second concurrent OCR run on the same
+// lecture, which is what caused "database is locked".
+async function pollOcrStatus(lectureId, { intervalMs = 2000, maxAttempts = 150 } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const { status } = await fetch(`/api/lectures/${lectureId}/ocr/status`).then((r) => r.json());
+    if (status !== "running") return status;
+  }
+  return "running";
+}
+
 async function openSummary(lectureId) {
   state.lectureId = lectureId;
   $("learn-lecture-list").hidden = true;
@@ -246,27 +410,38 @@ async function openSummary(lectureId) {
   bodyEl.innerHTML = "";
   kpEl.innerHTML = "";
 
+  const regenBtn = $("regen-summary-btn");
+  regenBtn.hidden = true;
+
   let res = await fetch(`/api/lectures/${lectureId}/summary`).then((r) => r.json());
   if (res.status === "done" && res.summary) {
     renderSummary(res.summary);
+    regenBtn.hidden = false;
   } else if (res.status === "generating") {
     statusEl.textContent = "Summary is being generated. Refresh in a moment.";
     return;
   } else {
     statusEl.innerHTML = `No summary yet. <button class="btn small" id="gen-summary-btn">Generate now (takes ~30-60s)</button>`;
-    $("gen-summary-btn").addEventListener("click", async () => {
-      statusEl.textContent = "Generating summary from lecture content...";
-      try {
-        await fetch(`/api/lectures/${lectureId}/summary/generate`, { method: "POST" });
-        statusEl.textContent = "Done! Reloading...";
-        res = await fetch(`/api/lectures/${lectureId}/summary`).then((r) => r.json());
-        renderSummary(res.summary);
-      } catch (e) {
-        statusEl.textContent = "Generation failed: " + e.message;
-      }
-    });
+    $("gen-summary-btn").addEventListener("click", () => runSummaryGeneration(lectureId, statusEl));
   }
   renderSourceSlides(lectureId);
+}
+
+async function runSummaryGeneration(lectureId, statusEl, label = "Generating summary from lecture content...") {
+  const regenBtn = $("regen-summary-btn");
+  statusEl.textContent = label;
+  regenBtn.disabled = true;
+  try {
+    await fetch(`/api/lectures/${lectureId}/summary/generate`, { method: "POST" });
+    statusEl.textContent = "Done! Reloading...";
+    const res = await fetch(`/api/lectures/${lectureId}/summary`).then((r) => r.json());
+    renderSummary(res.summary);
+    regenBtn.hidden = false;
+  } catch (e) {
+    statusEl.textContent = "Generation failed: " + e.message;
+  } finally {
+    regenBtn.disabled = false;
+  }
 }
 
 function renderSourceSlides(lectureId) {
@@ -321,11 +496,15 @@ function renderSummary(s) {
   bodyEl.innerHTML = marked(s.body);
   const kps = JSON.parse(s.key_points || "[]");
   if (kps.length) {
-    kpEl.innerHTML = "<h4>High-yield key points</h4><ul>" + kps.map((k) => `<li>${escapeHtml(k)}</li>`).join("") + "</ul>";
+    kpEl.innerHTML = "<h4>High-yield key points</h4><ul>" + kps.map((k) => `<li>${marked(k)}</li>`).join("") + "</ul>";
   }
 }
 
 $("learn-back").addEventListener("click", () => loadLearnList());
+
+$("regen-summary-btn").addEventListener("click", () => {
+  runSummaryGeneration(state.lectureId, $("summary-status"), "Regenerating summary from lecture content...");
+});
 
 // ---------- Lightbox ----------
 let lbList = [];
@@ -370,35 +549,115 @@ $("lightbox").addEventListener("click", (e) => {
   if (e.target === $("lightbox")) closeLightbox();
 });
 
-// ---------- Slide citations (scroll deck to source slide) ----------
+// ---------- Slide footnotes ----------
+// A citation expands the referenced slide INLINE, right under the text you were
+// reading — click again to collapse. Nothing covers the page, so you never lose your
+// place, and several footnotes can stay open at once.
+const slideCache = new Map();
+
+async function fetchSlide(lectureId, num) {
+  const key = `${lectureId}:${num}`;
+  if (!slideCache.has(key)) {
+    slideCache.set(key, fetch(`/api/lectures/${lectureId}/slide/${num}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null));
+  }
+  return slideCache.get(key);
+}
+
+function slideCiteLectureId(cite) {
+  return parseInt(cite.dataset.lectureId, 10) || state.lectureId;
+}
+
+function slidePanelHTML(slide) {
+  if (!slide) return `<div class="muted">Slide not found.</div>`;
+  const imgs = (slide.images || [])
+    .map((u) => `<img class="cite-img" src="${u}" loading="lazy" data-src="${u}">`)
+    .join("");
+  const text = (slide.text || "").trim();
+  const caption = (slide.caption || "").trim();
+  return `
+    <div class="cite-slide-head">${escapeHtml(slide.lecture_title || "")} · Slide ${slide.slide_num}</div>
+    ${imgs ? `<div class="cite-imgs">${imgs}</div>` : ""}
+    ${text ? `<div class="cite-text">${escapeHtml(text)}</div>` : ""}
+    ${caption ? `<div class="cite-caption">${escapeHtml(caption)}</div>` : ""}`;
+}
+
+async function toggleSlideFootnote(cite) {
+  const num = parseInt(cite.dataset.slide, 10);
+  const lectureId = slideCiteLectureId(cite);
+  if (!lectureId || !num) return;
+
+  // The panel lives next to the citation, so it collapses back to exactly where it
+  // came from rather than being a separate overlay to dismiss.
+  let panel = cite.nextElementSibling;
+  if (panel && panel.classList.contains("cite-slide")) {
+    const open = !panel.hidden;
+    panel.hidden = open;
+    cite.classList.toggle("open", !open);
+    return;
+  }
+  panel = document.createElement("div");
+  panel.className = "cite-slide";
+  panel.innerHTML = `<div class="muted">Loading slide ${num}…</div>`;
+  cite.insertAdjacentElement("afterend", panel);
+  cite.classList.add("open");
+
+  const slide = await fetchSlide(lectureId, num);
+  panel.innerHTML = slidePanelHTML(slide);
+  // Images stay expandable to full size via the lightbox, but only on a second click.
+  wireImageZoom(panel, panel.querySelectorAll(".cite-img"));
+}
+
 document.addEventListener("click", (e) => {
   const cite = e.target.closest(".slide-cite");
   if (!cite) return;
   e.preventDefault();
-  const n = parseInt(cite.dataset.slide, 10);
-  const deck = $("slide-deck");
-  if (state.view === "learn" && deck) {
-    // Learn view: scroll to the deck slide
-    const el = deck.querySelector(`.deck-slide[data-slide-num="${n}"]`);
-    if (!el) return;
-    // clear previous highlights
-    deck.querySelectorAll(".deck-slide.flash").forEach((d) => d.classList.remove("flash"));
-    el.classList.add("flash");
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setTimeout(() => el.classList.remove("flash"), 2000);
-    return;
-  }
-  // Drill / Review view: open the source slide in the modal
-  let slide = state.currentSlide;
-  let images = state.currentImages || [];
-  const item = cite.closest(".review-item");
-  if (item) {
-    const idx = parseInt(item.dataset.qidx, 10);
-    const rs = state.reviewSlides[idx];
-    if (rs) { slide = rs; images = rs.images; }
-  }
-  openSlideModal(slide, images);
+  toggleSlideFootnote(cite);
 });
+
+// Hover preview: a small card showing the slide before you commit to expanding it.
+let hoverCard = null;
+let hoverTimer = null;
+
+function hideSlideHover() {
+  clearTimeout(hoverTimer);
+  if (hoverCard) { hoverCard.remove(); hoverCard = null; }
+}
+
+document.addEventListener("mouseover", (e) => {
+  const cite = e.target.closest(".slide-cite");
+  if (!cite) return;
+  const num = parseInt(cite.dataset.slide, 10);
+  const lectureId = slideCiteLectureId(cite);
+  if (!lectureId || !num) return;
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(async () => {
+    const slide = await fetchSlide(lectureId, num);
+    if (!slide || !cite.isConnected) return;
+    hideSlideHover();
+    hoverCard = document.createElement("div");
+    hoverCard.className = "cite-hover";
+    const img = (slide.images || [])[0];
+    hoverCard.innerHTML =
+      `<div class="cite-hover-head">Slide ${slide.slide_num}</div>` +
+      (img ? `<img src="${img}" loading="lazy">` : "") +
+      `<div class="cite-hover-text">${escapeHtml(
+        (slide.caption || slide.text || "").trim().slice(0, 220) || "No text on this slide."
+      )}</div><div class="cite-hover-hint">Click to pin below</div>`;
+    document.body.appendChild(hoverCard);
+    const r = cite.getBoundingClientRect();
+    const top = r.bottom + 8 + window.scrollY;
+    hoverCard.style.top = `${top}px`;
+    hoverCard.style.left =
+      `${Math.max(8, Math.min(r.left + window.scrollX, window.innerWidth - hoverCard.offsetWidth - 8))}px`;
+  }, 250);
+});
+
+document.addEventListener("mouseout", (e) => {
+  if (e.target.closest && e.target.closest(".slide-cite")) hideSlideHover();
+});
+window.addEventListener("scroll", hideSlideHover, { passive: true });
 
 // ---------- Source slide modal (drill explanations / review) ----------
 function openSlideModal(slide, images) {
@@ -644,15 +903,30 @@ async function renderSessionHistory() {
           <span class="muted"> · ${label} · ${timeMode} · ${status}</span><br>
           <span class="muted">${s.completed_count}/${s.target_count} answered</span>
         </div>
-        <div>${btn}</div>
+        <div class="hist-actions">
+          ${btn}
+          <button class="hist-del" data-act="delete" data-id="${s.id}"
+                  title="Remove from history">&times;</button>
+        </div>
       </div>`;
   }).join("");
   el.innerHTML += `<div class="hist-list">${rows}</div>`;
   el.querySelectorAll("button[data-act]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const id = parseInt(btn.dataset.id, 10);
-      if (btn.dataset.act === "resume") startExistingSession(id);
-      else startCompletedSessionReview(id);
+      if (btn.dataset.act === "resume") return startExistingSession(id);
+      if (btn.dataset.act === "review") return startCompletedSessionReview(id);
+
+      const row = btn.closest(".hist-row");
+      const name = row.querySelector(".w-title").textContent;
+      if (!confirm(
+        `Remove "${name}" from your session history?\n\n` +
+        `Your answers and missed questions are kept — only the history entry goes.`
+      )) return;
+      const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      if (!res.ok) return toast("Could not remove that session");
+      toast("Session removed");
+      renderSessionHistory();
     });
   });
 }
@@ -759,30 +1033,76 @@ async function onQuizTimeout() {
   await showReviewResults();
 }
 
+// The numbered strip under the question. Click a number to jump back and change an
+// answer — a misclick shouldn't be permanent.
+async function renderQuestionNav(activeQid) {
+  const el = $("question-nav");
+  if (!el) return;
+  let nav = [];
+  try {
+    nav = await fetch(`/api/sessions/${state.sessionId}/nav`).then((r) => r.json());
+  } catch (e) {
+    el.innerHTML = "";
+    return;
+  }
+  state.navCount = nav.length;
+  el.innerHTML = nav.map((n) => {
+    const classes = ["qnav-btn"];
+    if (n.question_id === activeQid) classes.push("current");
+    if (n.answered) {
+      // Correctness is a spoiler in quiz mode, so it stays hidden until the end.
+      classes.push(state.tutorMode ? (n.correct ? "ok" : "bad") : "done");
+    }
+    return `<button class="${classes.join(" ")}" data-qid="${n.question_id}"
+              title="Question ${n.position + 1}">${n.position + 1}</button>`;
+  }).join("");
+  el.querySelectorAll(".qnav-btn").forEach((b) => {
+    // Clicking the current number reloads it — a cheap "reset this question" that also
+    // means the strip never has a dead button.
+    b.addEventListener("click", () => loadQuestion(parseInt(b.dataset.qid, 10)));
+  });
+}
+
 async function loadNextQuestion() {
-  if (state.tutorMode) startTimer();
   const res = await fetch(`/api/sessions/${state.sessionId}/next`).then((r) => r.json());
-  const card = $("question-card");
   if (res.done) {
     showReviewResults();
     return;
   }
-  state.optionSelected = false;
-  currentQid = res.question.id;
-  const q = res.question;
+  renderQuestion(res.question);
+}
+
+async function loadQuestion(qid) {
+  const res = await fetch(`/api/sessions/${state.sessionId}/question/${qid}`)
+    .then((r) => r.json());
+  if (!res.question) return toast("Could not load that question");
+  renderQuestion(res.question);
+}
+
+async function renderQuestion(q) {
+  if (state.tutorMode) startTimer();
+  const card = $("question-card");
+  currentQid = q.id;
   state.currentImages = q.source_images || [];
   state.currentSlide = q.source_slide || null;
+  state.currentSource = q.question_source || "";
+
+  const answeredBefore = q.prior_selected_index !== null && q.prior_selected_index !== undefined;
+  state.optionSelected = false;
+  state.pendingIndex = answeredBefore ? q.prior_selected_index : null;
+  state.revealed = false;
 
   const opts = q.options.map((o, i) => {
     const letter = String.fromCharCode(65 + i);
-    return `<button class="option" data-idx="${i}" data-correct="${q.correct_index === i ? 1 : 0}">
+    const sel = i === q.prior_selected_index ? " selected" : "";
+    return `<button class="option${sel}" data-idx="${i}" data-correct="${q.correct_index === i ? 1 : 0}">
       <strong>${letter}.</strong> ${escapeHtml(o)}
     </button>`;
   }).join("");
 
   const prog = $("session-progress");
   const sess = await fetch(`/api/sessions/${state.sessionId}`).then((r) => r.json());
-  prog.textContent = `Question ${sess.session.completed_count + 1} of ${sess.session.target_count}` +
+  prog.textContent = `${sess.session.completed_count} of ${sess.session.target_count} answered` +
     ` · ${state.tutorMode ? "Tutor" : "Quiz"}`;
 
   card.innerHTML = `
@@ -794,64 +1114,139 @@ async function loadNextQuestion() {
         <p id="explain-text"></p>
         <div id="source-images"></div>
       </div>
-      <div class="quiz-nav"><button class="btn" id="next-q" disabled>Next</button></div>
+      <div class="quiz-nav">
+        <button class="btn" id="submit-q" ${answeredBefore ? "" : "disabled"}
+        >${answeredBefore ? "Submit change" : "Submit"}</button>
+        <button class="btn ghost" id="next-q">Next</button>
+      </div>
+      <div class="qnav-wrap"><div id="question-nav" class="qnav"></div></div>
     </div>`;
 
+  const submitBtn = card.querySelector("#submit-q");
   const nextBtn = card.querySelector("#next-q");
-  nextBtn.addEventListener("click", () => loadNextQuestion());
+  const options = card.querySelectorAll(".option");
+  const expl = card.querySelector(".explanation");
 
-  card.querySelectorAll(".option").forEach((btn) => {
+  // Two display states. Whenever feedback is on screen the options are locked, and the
+  // button becomes "Change answer" — that button is the ONLY way back to editing, so
+  // the graded view can never become a dead end you have to navigate away from.
+  function showFeedback(selectedIdx, wasCorrect, explanation) {
+    state.revealed = true;
+    stopTimer();
+    options.forEach((b) => {
+      b.disabled = true;
+      b.classList.remove("wrong");
+      if (b.dataset.correct === "1") b.classList.add("correct");
+    });
+    if (!wasCorrect) {
+      const chosen = card.querySelector(`.option[data-idx="${selectedIdx}"]`);
+      if (chosen) chosen.classList.add("wrong");
+    }
+    showExplanation(explanation);
+    submitBtn.textContent = "Change answer";
+    submitBtn.disabled = false;
+  }
+
+  function enableEditing() {
+    state.revealed = false;
+    options.forEach((b) => {
+      b.disabled = false;
+      b.classList.remove("correct", "wrong");
+    });
+    if (expl) expl.hidden = true;
+    submitBtn.textContent = "Submit change";
+    submitBtn.disabled = state.pendingIndex === null;
+  }
+
+  // Selecting only highlights. Nothing is graded or recorded until Submit, so a
+  // misclick costs nothing.
+  options.forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (state.optionSelected) return;
+      if (state.revealed) return;
+      options.forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.pendingIndex = parseInt(btn.dataset.idx, 10);
       state.optionSelected = true;
-      nextBtn.disabled = false;
-      const idx = parseInt(btn.dataset.idx, 10);
-      if (state.tutorMode) {
-        const correct = btn.dataset.correct === "1";
-        btn.classList.add(correct ? "correct" : "wrong");
-        document.querySelectorAll(".option").forEach((b) => {
-          if (b.dataset.correct === "1") b.classList.add("correct");
-          if (!correct) b.classList.add("wrong");
-        });
-        stopTimer();
-        submitAnswer(q.id, idx, correct, true);
-      } else {
-        btn.classList.add("selected");
-        document.querySelectorAll(".option").forEach((b) => {
-          if (b !== btn) b.disabled = true;
-        });
-        submitAnswer(q.id, idx, btn.dataset.correct === "1", false);
-      }
+      submitBtn.disabled = false;
     });
   });
+
+  submitBtn.addEventListener("click", async () => {
+    // In the graded state this button unlocks the options instead of submitting.
+    if (state.revealed) return enableEditing();
+    if (state.pendingIndex === null) return;
+    submitBtn.disabled = true;
+    const chosen = card.querySelector(`.option[data-idx="${state.pendingIndex}"]`);
+    const correct = chosen.dataset.correct === "1";
+    const res = await submitAnswer(q.id, state.pendingIndex, correct, state.tutorMode);
+    if (!res) {
+      submitBtn.disabled = false;   // save failed; let them try again
+      return;
+    }
+    if (state.tutorMode) showFeedback(state.pendingIndex, correct, res.explanation);
+    await renderQuestionNav(q.id);
+    if (!state.tutorMode) loadNextQuestion();
+  });
+
+  nextBtn.addEventListener("click", () => loadNextQuestion());
+
+  // Revisiting something you already answered lands in the same graded state as if you
+  // had just submitted it — including the "Change answer" way back out.
+  if (answeredBefore && state.tutorMode) {
+    showFeedback(q.prior_selected_index, q.prior_correct, q.explanation);
+  }
+
+  await renderQuestionNav(q.id);
 }
 
+// POSTs the answer and reports the outcome. Returns the server response, or null if
+// the save failed — the caller only shows feedback for an answer that was recorded.
 async function submitAnswer(qid, selectedIndex, correct, reveal) {
-  const res = await fetch(`/api/sessions/${state.sessionId}/answer/${qid}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_index: selectedIndex }),
-  }).then((r) => r.json());
+  let res;
+  try {
+    const r = await fetch(`/api/sessions/${state.sessionId}/answer/${qid}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_index: selectedIndex }),
+    });
+    if (!r.ok) throw new Error(`server returned ${r.status}`);
+    res = await r.json();
+  } catch (e) {
+    // Silently swallowing this made a failed save look like a dead Next button:
+    // the answer was never recorded, so Next re-served the same question forever.
+    console.error("answer failed", e);
+    toast(`Answer not saved (${e.message}). Check the server log.`);
+    return null;
+  }
   if (reveal) {
-    const exp = $("explain-text");
-    exp.innerHTML = marked(res.explanation || "No explanation provided.");
-    const srcImg = $("source-images");
-    if (state.currentImages && state.currentImages.length) {
-      const cite = citationHTML(state.currentSlide);
-      srcImg.innerHTML = `<h4 class="src-title">Source material <span class="muted">(click to zoom)</span></h4>` +
-        state.currentImages.map((u) => `<img class="src-img" src="${u}" loading="lazy">`).join("") +
-        cite;
-      wireImageZoom(srcImg);
-    } else if (state.currentSlide) {
-      const cite = citationHTML(state.currentSlide);
-      srcImg.innerHTML = cite ? `<h4 class="src-title">Source</h4>${cite}` : "";
-    } else {
-      srcImg.innerHTML = "";
-    }
-    $("question-card").querySelector(".explanation").hidden = false;
-    if (!correct) toast("Missed — added to tomorrow's review");
+    if (res.revised) toast(correct ? "Updated — now correct" : "Updated — still incorrect");
+    else if (!correct) toast("Missed — added to tomorrow's review");
     else toast("Correct");
   }
+  return res;
+}
+
+// Renders the explanation + source block. Used both after submitting and when you
+// revisit a question you already answered.
+function showExplanation(explanation) {
+  const exp = $("explain-text");
+  if (!exp) return;
+  exp.innerHTML = marked(explanation || "No explanation provided.");
+  const srcImg = $("source-images");
+  const prof = professorBadge(state.currentSource);
+  if (state.currentImages && state.currentImages.length) {
+    const cite = citationHTML(state.currentSlide);
+    srcImg.innerHTML = `<h4 class="src-title">Source material <span class="muted">(click to zoom)</span></h4>` +
+      state.currentImages.map((u) => `<img class="src-img" src="${u}" loading="lazy">`).join("") +
+      cite + prof;
+    wireImageZoom(srcImg);
+  } else if (state.currentSlide || prof) {
+    const cite = citationHTML(state.currentSlide);
+    srcImg.innerHTML = cite || prof ? `<h4 class="src-title">Source</h4>${cite}${prof}` : "";
+  } else {
+    srcImg.innerHTML = "";
+  }
+  $("question-card").querySelector(".explanation").hidden = false;
 }
 
 function citationHTML(slide) {
@@ -859,9 +1254,17 @@ function citationHTML(slide) {
   const title = (slide.lecture_title || "").trim();
   const num = slide.slide_num;
   if (!title && !num) return "";
-  const cite = `Source: ${title || "Lecture"}${num ? ` · Slide ${num}` : ""}`;
+  const label = `Source: ${title || "Lecture"}${num ? ` · Slide ${num}` : ""}`;
   const cap = (slide.caption || "").trim();
-  return `<div class="src-cite">${escapeHtml(cite)}${cap ? `<br><span class="muted">${escapeHtml(cap)}</span>` : ""}</div>`;
+  // When we know which lecture and slide, the citation becomes a footnote you can
+  // hover to preview and click to expand in place.
+  if (num && slide.lecture_id) {
+    return `<div class="src-cite">` +
+      `<a href="#" class="slide-cite" data-slide="${num}" data-lecture-id="${slide.lecture_id}">` +
+      `${escapeHtml(label)}</a>` +
+      `${cap ? `<br><span class="muted">${escapeHtml(cap)}</span>` : ""}</div>`;
+  }
+  return `<div class="src-cite">${escapeHtml(label)}${cap ? `<br><span class="muted">${escapeHtml(cap)}</span>` : ""}</div>`;
 }
 
 async function showReviewResults() {
@@ -902,8 +1305,8 @@ async function showReviewResults() {
           : (isCorrect ? '<span class="rev-tag rev-tag-good">Correct</span>' : '<span class="rev-tag rev-tag-bad">Incorrect</span>');
         const imgs = (q.source_images || []).length
           ? `<div class="review-imgs">${q.source_images.map((u) => `<img class="src-img" src="${u}" loading="lazy">`).join("")}` +
-            citationHTML({ lecture_title: q.lecture_title, slide_num: q.slide_num, caption: q.slide_caption }) + `</div>`
-          : (citationHTML({ lecture_title: q.lecture_title, slide_num: q.slide_num, caption: q.slide_caption }) || "");
+            citationHTML({ lecture_id: q.lecture_id, lecture_title: q.lecture_title, slide_num: q.slide_num, caption: q.slide_caption }) + `</div>`
+          : (citationHTML({ lecture_id: q.lecture_id, lecture_title: q.lecture_title, slide_num: q.slide_num, caption: q.slide_caption }) || "");
         return `
         <div class="review-item" data-qidx="${i}">
           <div class="review-q">
@@ -922,15 +1325,22 @@ async function showReviewResults() {
           </div>
           <div class="review-explain"><strong>Explanation:</strong> ${marked(q.explanation || "None")}</div>
           ${imgs}
+          ${professorBadge(q.question_source)}
         </div>`;
       }).join("")}
     </div>
+    <div id="session-recommendations" class="rec-wrap"></div>
     <div style="margin-top:16px"><button class="btn" id="review-back">Back to setup</button></div>`;
   review.querySelectorAll(".review-item").forEach((item) => {
     wireImageZoom(item, item.querySelectorAll(".src-img"));
   });
   $("review-back").addEventListener("click", loadDrill);
   await refreshMissedSummary();
+  // Only worth an API call once something was actually missed.
+  const missedAny = qs.some((q) => !isCorrectQ(q));
+  if (missedAny) {
+    await renderSessionRecommendations(state.sessionId, $("session-recommendations"));
+  }
 }
 
 $("quit-session").addEventListener("click", () => {
@@ -942,6 +1352,7 @@ $("quit-session").addEventListener("click", () => {
 
 // ---------- Progress ----------
 async function loadProgress() {
+  loadSavedRecommendations();
   const body = $("progress-body");
   const d = await fetch("/api/dashboard").then((r) => r.json());
   const lect = await fetch("/api/lectures").then((r) => r.json());
@@ -1010,6 +1421,156 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// ---------- Mastery projection ----------
+async function loadProjection() {
+  const el = $("projection-body");
+  if (!el) return;
+  let p;
+  try {
+    p = await fetch("/api/mastery_projection").then((r) => r.json());
+  } catch (e) {
+    el.textContent = "Could not calculate.";
+    return;
+  }
+  if (!p.slides_total) {
+    el.innerHTML = `<span class="muted">Import a lecture to see a projection.</span>`;
+    return;
+  }
+  if (p.slides_mastered >= p.slides_total) {
+    el.innerHTML = `<div class="proj-headline">All ${p.slides_total} slides mastered.</div>`;
+    return;
+  }
+  const acc = p.accuracy_is_assumed
+    ? `assuming ${Math.round(p.accuracy * 100)}% accuracy until you answer some`
+    : `at your current ${Math.round(p.accuracy * 100)}% accuracy`;
+
+  const rows = p.milestones.map((m) => {
+    if (m.already_there) {
+      return `<tr class="proj-done"><td>${m.pct}% mastery</td><td colspan="2">reached</td></tr>`;
+    }
+    if (!m.reachable) {
+      return `<tr><td>${m.pct}% mastery</td><td class="muted" colspan="2">not reachable at this accuracy</td></tr>`;
+    }
+    return `<tr${m.pct === p.target_pct ? ' class="proj-target"' : ""}>
+      <td>${m.pct}% mastery</td>
+      <td><strong>${m.questions}</strong> questions</td>
+      <td class="muted">${m.sessions} session${m.sessions === 1 ? "" : "s"}</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="proj-headline">~${p.questions_remaining} more questions to ${p.target_pct}%</div>
+    <div class="proj-sub">
+      ≈ ${p.sessions_remaining} session${p.sessions_remaining === 1 ? "" : "s"} ·
+      likely range ${p.questions_p25}–${p.questions_p75} · ${escapeHtml(acc)}
+    </div>
+    <div class="proj-bar"><span style="width:${p.mastery_pct}%"></span></div>
+    <div class="proj-sub">
+      ${p.slides_mastered} of ${p.slides_total} slides mastered (${p.mastery_pct}%) —
+      a slide counts once you've answered it right at least as often as you've missed it.
+    </div>
+    <table class="proj-table">${rows}</table>
+    <div class="proj-note muted">
+      Simulated ${p.trials}× through the app's real slide-picking, session by session.
+      The last few percent cost far more than the first — random draws have to land on
+      exactly the slides you still owe — which is why the headline targets ${p.target_pct}%.
+    </div>`;
+}
+
+// ---------- Study recommendations ----------
+function recommendationHTML(rec, opts = {}) {
+  if (!rec) return "";
+  const themes = (rec.themes || []).map((t) => `
+    <li class="rec-theme">
+      <div class="rec-topic">${escapeHtml(t.topic)}</div>
+      ${t.why ? `<div class="rec-why">${escapeHtml(t.why)}</div>` : ""}
+      ${t.action ? `<div class="rec-action">→ ${escapeHtml(t.action)}</div>` : ""}
+    </li>`).join("");
+  const head = opts.title
+    ? `<div class="rec-head">${escapeHtml(opts.title)}
+         <span class="muted">· ${rec.mistake_count} missed · ${escapeHtml((rec.created_at || "").slice(0, 10))}</span>
+       </div>`
+    : "";
+  return `<div class="rec-card">
+    ${head}
+    ${rec.summary ? `<div class="rec-summary">${escapeHtml(rec.summary)}</div>` : ""}
+    ${themes ? `<ul class="rec-list">${themes}</ul>` : ""}
+  </div>`;
+}
+
+async function renderSessionRecommendations(sid, container) {
+  container.innerHTML = `<div class="muted">Looking for patterns in your mistakes…</div>`;
+  let res;
+  try {
+    // Cached in the database after the first call, so reopening a review is free.
+    res = await fetch(`/api/sessions/${sid}/recommendations`, { method: "POST" })
+      .then((r) => r.json());
+  } catch (e) {
+    container.innerHTML = `<div class="muted">Could not generate recommendations.</div>`;
+    return;
+  }
+  if (res.error) {
+    container.innerHTML = `<div class="muted">Recommendations unavailable: ${escapeHtml(res.error)}</div>`;
+    return;
+  }
+  if (!res.recommendations) {
+    container.innerHTML = `<div class="muted">Nothing missed in this session — no recommendations needed.</div>`;
+    return;
+  }
+  container.innerHTML = `<h3 class="rec-title">What to work on</h3>` +
+    recommendationHTML(res.recommendations);
+}
+
+async function loadSavedRecommendations() {
+  const el = $("saved-recommendations");
+  if (!el) return;
+  let list = [];
+  try {
+    list = await fetch("/api/recommendations").then((r) => r.json());
+  } catch (e) {
+    list = [];
+  }
+  if (!list.length) {
+    el.innerHTML = `<div class="muted">No recommendations yet — finish a session with a few misses.</div>`;
+    return;
+  }
+  el.innerHTML = list
+    .map((r) => recommendationHTML(r, { title: r.session_title || `Session ${r.session_id}` }))
+    .join("");
+}
+
+// ---------- API usage indicator ----------
+function fmtTokens(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return String(n);
+}
+
+async function refreshUsage() {
+  try {
+    const u = await fetch("/api/usage").then((r) => r.json());
+    $("usage-model").textContent = u.model;
+    $("usage-tokens").textContent = fmtTokens(u.today.total_tokens) + " today";
+    $("usage-cache").textContent = u.today.cache_hit_pct
+      ? u.today.cache_hit_pct + "% cached"
+      : "";
+    const kinds = u.today_by_kind
+      .map((k) => `${k.kind || "other"}: ${fmtTokens(k.tokens)} (${k.calls} calls)`)
+      .join("\n");
+    $("usage-chip").title =
+      `${u.provider} / ${u.model}\n` +
+      `Today: ${u.today.calls} calls, ${fmtTokens(u.today.total_tokens)} tokens ` +
+      `(${fmtTokens(u.today.cached_tokens)} cached)\n` +
+      `All time: ${u.all_time.calls} calls, ${fmtTokens(u.all_time.total_tokens)} tokens` +
+      (kinds ? `\n\n${kinds}` : "");
+  } catch (e) {
+    $("usage-tokens").textContent = "-";
+  }
+}
+
 // ---------- Init ----------
 initTheme();
 loadDashboard();
+loadQuestionSetLectures();
+refreshUsage();
+setInterval(refreshUsage, 60000);

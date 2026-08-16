@@ -1,6 +1,6 @@
 import os
 import re
-import fitz
+import pymupdf as fitz
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
