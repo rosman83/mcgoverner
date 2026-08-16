@@ -10,6 +10,7 @@ set -uo pipefail
 
 REPO_URL="https://github.com/redfluff20/Block1Exam.git"
 REPO_BRANCH="rashid/vision-fallback-and-config"   # everyone tracks this branch, not main
+ZIP_URL="https://github.com/redfluff20/Block1Exam/archive/refs/heads/${REPO_BRANCH}.zip"
 RUN_LOG="/tmp/block1exam-run.log"
 
 # Every failure path used to just... end. No window, no error, nothing visible
@@ -46,36 +47,67 @@ with_timeout() {
   return $status
 }
 
+# Fetch the code with plain curl + unzip, no git required. Most people have
+# neither git nor Xcode Command Line Tools installed - the first time `git`
+# runs on a machine without them, macOS pops up its own "install developer
+# tools" prompt and waits on it, which most people don't know to click through
+# (this is what was actually hanging - see the fetch_code comment below).
+# curl/unzip/rsync ship with every Mac; git does not.
+fetch_code() {
+  local tmp src
+  tmp="$(mktemp -d)" || return 1
+  if ! curl -sL --connect-timeout 15 --max-time 60 -o "$tmp/repo.zip" "$ZIP_URL" >> "$RUN_LOG" 2>&1; then
+    rm -rf "$tmp"; return 1
+  fi
+  if ! unzip -q "$tmp/repo.zip" -d "$tmp/extracted" >> "$RUN_LOG" 2>&1; then
+    rm -rf "$tmp"; return 1
+  fi
+  src="$(find "$tmp/extracted" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  if [ -z "$src" ]; then
+    rm -rf "$tmp"; return 1
+  fi
+  mkdir -p "$INSTALL_DIR"
+  # Overlay the code onto the persistent install dir. .env/data/lectures/.venv
+  # are excluded from both the copy AND the delete pass, so a fresh download
+  # every launch never touches config or imported lectures - this is simpler
+  # than diffing against git history and works identically for every user.
+  rsync -a --delete \
+    --exclude=.env --exclude=data --exclude=lectures --exclude=.venv --exclude=.git \
+    "$src"/ "$INSTALL_DIR"/ >> "$RUN_LOG" 2>&1
+  rm -rf "$tmp"
+}
+
 # If this app is running from inside an existing checkout of this repo (a local
 # dev build via build_app.sh, still sitting in packaging/), use that checkout in
-# place instead of a separate ~/Block1Exam clone — its .env and data/ are real,
-# a fresh clone elsewhere would never see them. A distributed, downloaded copy
-# (what real end users get, sitting in ~/Downloads with no surrounding repo)
-# won't match anything here and falls through to the normal clone below.
+# place via git instead — git is guaranteed to already be there (it's how the
+# checkout exists at all), and this preserves normal `git pull` semantics for
+# active development. A distributed, downloaded copy (what real end users get,
+# sitting in ~/Downloads with no surrounding repo) won't match anything here.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/Block1Exam"
+IS_DEV_CHECKOUT=0
 dir="$SCRIPT_DIR"
 for _ in 1 2 3 4 5 6; do
   dir="$(dirname "$dir")"
   if [ -d "$dir/.git" ] && git -C "$dir" remote get-url origin 2>/dev/null | grep -q "Block1Exam"; then
     INSTALL_DIR="$dir"
+    IS_DEV_CHECKOUT=1
     echo "Running from a local checkout ($INSTALL_DIR) — using it in place."
     break
   fi
 done
 
-# http.lowSpeedLimit/-Time aborts a transfer that stalls mid-flight; with_timeout
-# below is the backstop for a connection that never gets that far at all.
-GIT="git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15"
-
-if [ -d "$INSTALL_DIR/.git" ]; then
+if [ "$IS_DEV_CHECKOUT" -eq 1 ]; then
+  # http.lowSpeedLimit/-Time aborts a transfer that stalls mid-flight;
+  # with_timeout is the backstop for a connection that never gets that far.
+  GIT="git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15"
   if ! with_timeout 30 $GIT -C "$INSTALL_DIR" fetch --quiet origin "$REPO_BRANCH" > "$RUN_LOG" 2>&1 \
       || ! $GIT -C "$INSTALL_DIR" checkout --quiet "$REPO_BRANCH" >> "$RUN_LOG" 2>&1 \
       || ! $GIT -C "$INSTALL_DIR" pull --quiet --ff-only origin "$REPO_BRANCH" >> "$RUN_LOG" 2>&1; then
     echo "Update check failed (offline, VPN/firewall, or local edits in $INSTALL_DIR) — launching the version already installed." >> "$RUN_LOG"
   fi
 else
-  if ! with_timeout 60 $GIT clone --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR" > "$RUN_LOG" 2>&1; then
+  if ! fetch_code; then
     show_error "Could not download Block1Exam. Check your internet connection — a corporate VPN or firewall blocking/intercepting github.com will also cause this."
     exit 1
   fi
