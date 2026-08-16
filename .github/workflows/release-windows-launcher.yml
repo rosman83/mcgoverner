@@ -1,0 +1,36 @@
+name: Release Windows launcher
+
+# Zips the Windows launcher and publishes it to the same rolling release the
+# Mac launcher uses. Runs on push to packaging/windows/** or run.ps1 - the
+# launcher only downloads the branch's code at runtime, it doesn't bundle it,
+# so this doesn't need to run on every commit.
+on:
+  push:
+    branches: [rashid/vision-fallback-and-config]
+    paths: ["packaging/windows/**", "run.ps1"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip the launcher
+        shell: pwsh
+        run: Compress-Archive -Path packaging\windows\* -DestinationPath packaging\windows\Block1Exam-Windows.zip -Force
+
+      - name: Publish to the shared launcher release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-launcher-latest
+          name: Block1Exam Launchers
+          make_latest: "true"
+          files: packaging/windows/Block1Exam-Windows.zip
+          # No `body:` here on purpose - this and the Mac workflow both publish
+          # to the same release tag, and omitting body leaves whatever's
+          # already there untouched instead of one workflow clobbering the
+          # other's notes on every run.

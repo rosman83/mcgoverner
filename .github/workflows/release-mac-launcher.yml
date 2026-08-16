@@ -34,17 +34,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mac-launcher-latest
-          name: Block1Exam Mac Launcher
+          name: Block1Exam Launchers
           make_latest: "true"
           files: packaging/Block1Exam.app.zip
-          body: |
-            Double-click launcher for macOS. No terminal needed after the first launch.
-
-            1. Download `Block1Exam.app.zip` below and unzip it.
-            2. Right-click the app → **Open** (only needed once — this bypasses macOS's
-               "unidentified developer" warning; a plain double-click will refuse to run it
-               the first time).
-            3. It opens your browser to the app automatically. Every future launch re-checks
-               for updates on its own — just reopen the app, no reinstalling.
-
-            Requires an API key on first run — the app will walk you to the Settings page for it.
+          # See release-windows-launcher.yml for why body isn't set here -
+          # the two workflows share this release tag and neither should
+          # clobber the notes the other (or a manual edit) already wrote.
