@@ -79,20 +79,29 @@ function Fetch-Code {
     return $true
 }
 
+Write-Host "Downloading the latest version..."
 if (-not (Fetch-Code)) {
+    Write-Host "FAILED to download. Details:"
+    Get-Content $RunLog -ErrorAction SilentlyContinue | Write-Host
     Show-Error "Could not download McGoverner. Check your internet connection - a corporate VPN or firewall blocking/intercepting github.com will also cause this."
     exit 1
 }
+Write-Host "Downloaded."
 
 Set-Location $InstallDir
 
+Write-Host "Starting the server (first run can take a minute or two while dependencies install)..."
 $psArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $InstallDir "run.ps1"))
 $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $psArgs -RedirectStandardOutput $RunLog -RedirectStandardError "$RunLog.err" -WindowStyle Hidden -PassThru
 
 # Open the browser once the server actually answers, not on a blind timer -
 # uv installing dependencies on a first run can take a while. Bail early if
 # the server process has already died instead of polling the full timeout.
+# Echo the run log's own progress here every few seconds too, since this
+# window is visible now - a silent multi-minute wait looks just as broken
+# as the failure it's meant to help diagnose.
 $started = $false
+$lastLine = ""
 for ($i = 0; $i -lt 120; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:8000" -UseBasicParsing -TimeoutSec 2
@@ -103,10 +112,19 @@ for ($i = 0; $i -lt 120; $i++) {
         }
     } catch {}
     if ($proc.HasExited) { break }
+    if ($i % 5 -eq 0) {
+        $line = Get-Content $RunLog -Tail 1 -ErrorAction SilentlyContinue
+        if ($line -and $line -ne $lastLine) {
+            Write-Host "  ...$line"
+            $lastLine = $line
+        }
+    }
     Start-Sleep -Seconds 1
 }
 
 if (-not $started) {
+    Write-Host "FAILED to start. Full log:"
+    Get-Content $RunLog -ErrorAction SilentlyContinue | Write-Host
     Show-Error "McGoverner didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
     # Don't leave a hung install/server running in the background after
     # telling the user it failed.
@@ -118,4 +136,5 @@ if (-not $started) {
     exit 1
 }
 
+Write-Host "Ready. Your browser should have opened - if not, go to http://localhost:8000"
 Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
