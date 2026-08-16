@@ -84,6 +84,12 @@ async def api_import_lectures(files: list[UploadFile] = File(...)):
                 continue
             lid = import_lecture(dest)
             imported.append(lid)
+            # New users have no idea OCR/captions/summaries are separate manual
+            # steps, and shouldn't need to - kick off the full pipeline right
+            # away so a freshly imported lecture is already usable by the time
+            # they click into it.
+            import threading
+            threading.Thread(target=_analyze_lecture, args=(lid,), daemon=True).start()
         except Exception as e:
             errors.append(f"{f.filename}: {e}")
     return {"imported": imported, "errors": errors, "duplicates": duplicates}
@@ -250,24 +256,44 @@ def api_extract_images(lid: int):
     return {"count": count, "kind": kind}
 
 
+def _analyze_lecture(lid, force_captions=False):
+    """The full pipeline: OCR -> captions -> summary. Runs automatically right
+    after import (new users never have to know these steps exist), and is also
+    what the "Reanalyze" button re-runs on demand. Same total LLM spend either
+    way - this doesn't do any work the old separate OCR/Captions/Generate-summary
+    buttons didn't already do, it just stops requiring three manual clicks."""
+    from app.ingest.ocr import run_ocr_for_lecture
+    run_ocr_for_lecture(lid)
+    try:
+        from app.llm.captions import generate_captions_for_lecture
+        generate_captions_for_lecture(lid, force=force_captions)
+    except Exception as e:
+        print(f"caption generation failed for lecture {lid}: {e}")
+    try:
+        generate_summary(lid)
+    except Exception as e:
+        print(f"summary generation failed for lecture {lid}: {e}")
+
+
 @app.post("/api/lectures/{lid}/ocr")
 def api_ocr_lecture(lid: int):
     """Run OCR on all slide images for a lecture (background)."""
-    from app.ingest.ocr import run_ocr_for_lecture
     import threading
+    # force_captions=False: OCR is deterministic, so re-running it usually yields
+    # the same text and existing captions stay valid. /reanalyze is the explicit
+    # "redo everything" path.
+    threading.Thread(target=_analyze_lecture, args=(lid,), daemon=True).start()
+    return {"status": "started"}
 
-    def _run():
-        run_ocr_for_lecture(lid)
-        try:
-            from app.llm.captions import generate_captions_for_lecture
-            # force=False: OCR is deterministic, so re-running it usually yields the
-            # same text and existing captions stay valid. The /captions route is the
-            # explicit "regenerate everything" path.
-            generate_captions_for_lecture(lid, force=False)
-        except Exception as e:
-            print(f"caption generation failed for lecture {lid}: {e}")
 
-    threading.Thread(target=_run, daemon=True).start()
+@app.post("/api/lectures/{lid}/reanalyze")
+def api_reanalyze_lecture(lid: int):
+    """Full redo: OCR + captions + summary, forcing regeneration of all three.
+    The one button a user needs after re-running OCR turns up better image
+    content (vision fallback improvements, etc.) - no need to know there used
+    to be three separate steps for this."""
+    import threading
+    threading.Thread(target=_analyze_lecture, args=(lid,), kwargs={"force_captions": True}, daemon=True).start()
     return {"status": "started"}
 
 

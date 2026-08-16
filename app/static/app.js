@@ -232,6 +232,9 @@ $("import-btn").addEventListener("click", async () => {
   try {
     const res = await fetch("/api/lectures/import", { method: "POST", body: fd }).then((r) => r.json());
     let msg = `Imported ${res.imported.length} lecture(s).`;
+    if (res.imported.length) {
+      msg += " OCR, captions, and summaries are generating in the background — check back in a few minutes.";
+    }
     if (res.duplicates && res.duplicates.length) {
       msg += ` Skipped ${res.duplicates.length} duplicate(s): ` + res.duplicates.map((d) => d.title).join("; ");
     }
@@ -414,8 +417,7 @@ async function loadLearnList() {
       </div>
       <div class="row-actions">
         <span class="meta">${status}</span>
-        <button class="btn small ghost" id="cap-${l.id}">Captions</button>
-        <button class="btn small ghost" id="ocr-${l.id}">OCR</button>
+        <button class="btn small ghost" id="reanalyze-${l.id}" title="Redo OCR, captions, and the summary from scratch">Reanalyze</button>
         <button class="btn small ghost danger-text" id="del-${l.id}">Delete</button>
       </div>`;
     row.addEventListener("click", (e) => {
@@ -424,23 +426,15 @@ async function loadLearnList() {
       openSummary(l.id);
     });
     wireLectureEditing(row, l);
-    const ocr = row.querySelector(`#ocr-${l.id}`);
-    ocr.addEventListener("click", async () => {
-      ocr.disabled = true;
-      ocr.textContent = "OCR running...";
-      await fetch(`/api/lectures/${l.id}/ocr`, { method: "POST" });
-      toast("OCR + captions running in background — this can take a few minutes if slides need the vision fallback");
+    const reanalyze = row.querySelector(`#reanalyze-${l.id}`);
+    reanalyze.addEventListener("click", async () => {
+      reanalyze.disabled = true;
+      reanalyze.textContent = "Reanalyzing...";
+      await fetch(`/api/lectures/${l.id}/reanalyze`, { method: "POST" });
+      toast("Redoing OCR, captions, and summary in the background — this can take a few minutes if slides need the vision fallback");
       await pollOcrStatus(l.id);
-      ocr.disabled = false;
-      ocr.textContent = "OCR";
-    });
-    const cap = row.querySelector(`#cap-${l.id}`);
-    cap.addEventListener("click", async () => {
-      cap.disabled = true;
-      cap.textContent = "Generating...";
-      await fetch(`/api/lectures/${l.id}/captions`, { method: "POST" });
-      toast("Generating image captions in background (~1 min)");
-      setTimeout(() => { cap.disabled = false; cap.textContent = "Captions"; }, 3000);
+      reanalyze.disabled = false;
+      reanalyze.textContent = "Reanalyze";
     });
     const del = row.querySelector(`#del-${l.id}`);
     del.addEventListener("click", async () => {
