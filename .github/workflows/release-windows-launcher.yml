@@ -25,7 +25,7 @@ jobs:
 
       - name: Build the installer (Inno Setup ships preinstalled on windows-latest)
         shell: pwsh
-        run: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\McGoverner.iss
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\McGoverner.iss'
 
       - name: Publish to the shared launcher release
         uses: softprops/action-gh-release@v2
