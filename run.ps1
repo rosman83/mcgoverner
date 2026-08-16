@@ -48,10 +48,32 @@ if ((Test-Path ".venv") -and -not (Test-VenvOk)) {
     Write-Output "Existing .venv is on too old a Python - rebuilding it."
     Remove-Item -Recurse -Force ".venv"
 }
+
+# uv can end up with a stale registry entry for a managed Python whose actual
+# binary is gone (antivirus deleting an unrecognized downloaded .exe is common
+# on locked-down school/hospital machines, or a prior run got interrupted
+# mid-download) - `uv venv` then exits 0 against a python.exe that isn't
+# really there, and neither call here was checking its exit code, so that
+# failure surfaced three steps later as a confusing "module .venv could not
+# be loaded" error instead of a clear one at the actual point of failure.
+# Force-reinstall the interpreter and retry once before giving up.
 if (-not (Test-Path ".venv")) {
     uv venv .venv --python 3.12 --quiet
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path ".venv\Scripts\python.exe")) {
+        Write-Output "venv creation failed or produced no working interpreter - reinstalling Python 3.12 and retrying once."
+        Remove-Item -Recurse -Force ".venv" -ErrorAction SilentlyContinue
+        uv python install 3.12 --reinstall
+        uv venv .venv --python 3.12 --quiet
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path ".venv\Scripts\python.exe")) {
+            throw "uv venv failed twice in a row (exit $LASTEXITCODE) - .venv\Scripts\python.exe still missing after reinstalling the interpreter."
+        }
+    }
 }
+
 uv pip install --python ".venv\Scripts\python.exe" --quiet -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    throw "uv pip install failed (exit $LASTEXITCODE) - see the output above for which package."
+}
 
 if (-not $env:DEEPSEEK_API_KEY -and -not $env:OPENROUTER_API_KEY) {
     Write-Output "WARNING: no LLM key set. Add DEEPSEEK_API_KEY or OPENROUTER_API_KEY to .env."
