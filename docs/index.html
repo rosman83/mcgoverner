@@ -29,11 +29,10 @@
   }
   .head { text-align: center; }
   .logo {
-    max-height: 96px;
-    max-width: 130px;
-    width: auto;
-    height: auto;
-    border-radius: 10px;
+    width: 96px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 50%;
     box-shadow: 0 1px 3px rgba(0,0,0,0.12);
   }
   .tagline {
@@ -54,6 +53,15 @@
     text-decoration: none;
   }
   .contact a:hover { text-decoration: underline; }
+
+  .preview-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 36px;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.14);
+  }
 
   .steps { margin-top: 52px; }
   .step {
@@ -155,11 +163,12 @@
 <body>
   <div class="wrap">
     <div class="head">
-      <img class="logo" src="https://medicalschoolhq.net/wp-content/uploads/2019/01/McGovern-at-University-of-Texas-Houston-Secondary-Application-836x1024.png" alt="McGovern Medical School">
+      <img class="logo" src="assets/jay-patel.jpg" alt="Jay Patel">
       <div class="tagline">Made for M1 year at McGovern MS</div>
       <div class="contact">
         Contact <a href="mailto:rashid.osman@uth.tmc.edu">Rashid</a> and <a href="mailto:eshan.manchanda@uth.tmc.edu">Eshan</a> for inquiries
       </div>
+      <video class="preview-video" src="assets/preview.mp4" autoplay muted loop playsinline preload="metadata"></video>
     </div>
 
     <div class="steps">
