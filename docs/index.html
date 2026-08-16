@@ -28,12 +28,30 @@
     padding: 60px 24px 80px;
   }
   .head { text-align: center; }
-  .logo {
-    width: 96px;
-    height: 96px;
+  .avatars {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+  }
+  .person {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .hat {
+    width: 50px;
+    height: auto;
+    margin-bottom: -10px;
+    position: relative;
+    z-index: 1;
+  }
+  .avatar {
+    width: 72px;
+    height: 72px;
     object-fit: cover;
     border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    border: 2px solid #fff;
   }
   .tagline {
     color: var(--orange);
@@ -163,7 +181,16 @@
 <body>
   <div class="wrap">
     <div class="head">
-      <img class="logo" src="assets/jay-patel.jpg" alt="Jay Patel">
+      <div class="avatars">
+        <div class="person">
+          <svg class="hat" viewBox="0 0 64 40" aria-hidden="true"><ellipse cx="32" cy="30" rx="30" ry="7" fill="#4a2f1c"/><path d="M15 27 Q15 8 32 8 Q49 8 49 27 Z" fill="#5c3a21"/><rect x="15" y="21" width="34" height="5" fill="#B74C19"/></svg>
+          <img class="avatar" src="assets/rashid.jpg" alt="Rashid">
+        </div>
+        <div class="person">
+          <svg class="hat" viewBox="0 0 64 40" aria-hidden="true"><ellipse cx="32" cy="30" rx="30" ry="7" fill="#4a2f1c"/><path d="M15 27 Q15 8 32 8 Q49 8 49 27 Z" fill="#5c3a21"/><rect x="15" y="21" width="34" height="5" fill="#B74C19"/></svg>
+          <img class="avatar" src="assets/eshan.jpg" alt="Eshan">
+        </div>
+      </div>
       <div class="tagline">Made for M1 year at McGovern MS</div>
       <div class="contact">
         Contact <a href="mailto:rashid.osman@uth.tmc.edu">Rashid</a> and <a href="mailto:eshan.manchanda@uth.tmc.edu">Eshan</a> for inquiries
