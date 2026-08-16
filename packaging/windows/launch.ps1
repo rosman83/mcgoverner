@@ -107,11 +107,15 @@ $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $psArgs -Redirect
 # Open the browser once the server actually answers, not on a blind timer -
 # uv installing dependencies on a first run can take a while. Bail early if
 # the server process has already died instead of polling the full timeout.
-# Echo the run log's own progress here every few seconds too, since this
-# window is visible now - a silent multi-minute wait looks just as broken
-# as the failure it's meant to help diagnose.
+#
+# Only ever echo run.ps1's curated "PROGRESS: " lines here, never raw log
+# output - a self-healing retry or the no-API-key note used to get echoed
+# verbatim (since they were literally the log's last line) and read as "you
+# need to fix something" when there was nothing to do. The full raw log
+# (including those lines) still gets dumped below on an actual failure -
+# this only changes what shows during a normal run.
 $started = $false
-$lastLine = ""
+$lastProgress = ""
 for ($i = 0; $i -lt 120; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:8000" -UseBasicParsing -TimeoutSec 2
@@ -122,12 +126,14 @@ for ($i = 0; $i -lt 120; $i++) {
         }
     } catch {}
     if ($proc.HasExited) { break }
-    if ($i % 5 -eq 0) {
-        $line = Get-Content $RunLog -Tail 1 -ErrorAction SilentlyContinue
-        if (-not $line) { $line = Get-Content "$RunLog.err" -Tail 1 -ErrorAction SilentlyContinue }
-        if ($line -and $line -ne $lastLine) {
-            Write-Host "  ...$line"
-            $lastLine = $line
+    $progressMatches = [regex]::Matches((Get-CombinedLog), "(?m)^PROGRESS: (.+)$")
+    if ($progressMatches.Count -gt 0) {
+        $latest = $progressMatches[$progressMatches.Count - 1].Groups[1].Value
+        if ($latest -ne $lastProgress) {
+            Write-Host "  $latest"
+            $lastProgress = $latest
+        } elseif ($i % 10 -eq 0 -and $i -gt 0) {
+            Write-Host "  ...still working (${i}s)"
         }
     }
     Start-Sleep -Seconds 1

@@ -19,6 +19,15 @@ New-Item -ItemType Directory -Force -Path "data", "lectures" | Out-Null
 # nobody needs git, Python, or uv pre-installed. Bound the install call so a
 # stalled connection (VPN/proxy that hangs instead of rejecting) fails fast
 # instead of hanging forever with no error, same reasoning as the Mac side.
+#
+# "PROGRESS: " lines are a deliberate, curated protocol with launch.ps1 (see
+# its heartbeat loop) - it only ever echoes these live, never raw output. A
+# self-healing retry or the missing-key note below are not the user's problem
+# to react to, so they're plain Write-Output (still visible in the full log
+# on a real failure) rather than PROGRESS - showing internal retry mechanics
+# or "you need to configure something" during a normal run just reads as
+# something being wrong when it isn't.
+Write-Output "PROGRESS: Setting up (first run can take a minute or two)..."
 $uvDir = Join-Path $env:USERPROFILE ".local\bin"
 $env:PATH = "$uvDir;$env:PATH"
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -76,8 +85,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not $env:DEEPSEEK_API_KEY -and -not $env:OPENROUTER_API_KEY) {
-    Write-Output "WARNING: no LLM key set. Add DEEPSEEK_API_KEY or OPENROUTER_API_KEY to .env."
-    Write-Output "         Pick the provider with LLM_PROVIDER=deepseek|openrouter (default: whichever key is set)."
+    # Not PROGRESS: the Settings page handles this in-browser now, so there is
+    # nothing to act on here - this is a note for someone reading the raw log,
+    # not an instruction for the person watching the launcher window.
+    Write-Output "Note: no API key set yet - the app's Settings page will walk you through adding one once it opens."
 }
 
+Write-Output "PROGRESS: Starting the app..."
 & ".venv\Scripts\uvicorn.exe" app.main:app --reload --port 8000
