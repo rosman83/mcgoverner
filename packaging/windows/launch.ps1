@@ -11,17 +11,27 @@ $ZipUrl = "https://github.com/rosman83/mcgoverner/archive/refs/heads/$RepoBranch
 $InstallDir = Join-Path $env:USERPROFILE "McGoverner"
 $RunLog = Join-Path $env:TEMP "mcgoverner-run.log"
 
+# run.ps1's own output splits across two files: stdout -> $RunLog, stderr ->
+# $RunLog.err (see Start-Process below). PowerShell exceptions and most native
+# command errors land on stderr, so reading only $RunLog was silently dropping
+# the actual fatal error every time and leaving only harmless status lines -
+# always read both together.
+function Get-CombinedLog {
+    $out = if (Test-Path $RunLog) { Get-Content $RunLog -Raw -ErrorAction SilentlyContinue } else { "" }
+    $err = if (Test-Path "$RunLog.err") { Get-Content "$RunLog.err" -Raw -ErrorAction SilentlyContinue } else { "" }
+    if ($err) { return "$out`n--- errors ---`n$err" }
+    return $out
+}
+
 # Every failure path used to just... end, with nothing visible for someone who
 # doesn't know to go digging in %TEMP% for a log file. Show a real dialog with
 # enough of the actual error to screenshot and send.
 function Show-Error([string]$Message) {
     Add-Type -AssemblyName System.Windows.Forms
     $detail = ""
-    if (Test-Path $RunLog) {
-        $raw = Get-Content $RunLog -Raw -ErrorAction SilentlyContinue
-        if ($raw) {
-            $detail = if ($raw.Length -gt 1500) { $raw.Substring($raw.Length - 1500) } else { $raw }
-        }
+    $raw = Get-CombinedLog
+    if ($raw) {
+        $detail = if ($raw.Length -gt 1500) { $raw.Substring($raw.Length - 1500) } else { $raw }
     }
     [System.Windows.Forms.MessageBox]::Show(
         "$Message`n`n$detail",
@@ -114,6 +124,7 @@ for ($i = 0; $i -lt 120; $i++) {
     if ($proc.HasExited) { break }
     if ($i % 5 -eq 0) {
         $line = Get-Content $RunLog -Tail 1 -ErrorAction SilentlyContinue
+        if (-not $line) { $line = Get-Content "$RunLog.err" -Tail 1 -ErrorAction SilentlyContinue }
         if ($line -and $line -ne $lastLine) {
             Write-Host "  ...$line"
             $lastLine = $line
@@ -124,7 +135,7 @@ for ($i = 0; $i -lt 120; $i++) {
 
 if (-not $started) {
     Write-Host "FAILED to start. Full log:"
-    Get-Content $RunLog -ErrorAction SilentlyContinue | Write-Host
+    Write-Host (Get-CombinedLog)
     Show-Error "McGoverner didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
     # Don't leave a hung install/server running in the background after
     # telling the user it failed.
