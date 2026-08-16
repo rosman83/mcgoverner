@@ -12,9 +12,13 @@ mkdir -p data lectures
 
 # uv is what the Mac launcher bootstraps too — this is the one place install/venv
 # logic lives, so `./run.sh` and the double-click launcher can't drift apart.
+# A stalled connection (VPN/proxy that hangs rather than rejects) used to make
+# this sit forever with no error - bound every network call here so a bad
+# network fails fast and loud instead of hanging silently.
 export PATH="$HOME/.local/bin:$PATH"
+export UV_HTTP_TIMEOUT=60
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl --connect-timeout 15 --max-time 60 -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
