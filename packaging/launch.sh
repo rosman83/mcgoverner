@@ -10,7 +10,24 @@ set -uo pipefail
 
 REPO_URL="https://github.com/redfluff20/Block1Exam.git"
 REPO_BRANCH="rashid/vision-fallback-and-config"   # everyone tracks this branch, not main
+
+# If this app is running from inside an existing checkout of this repo (a local
+# dev build via build_app.sh, still sitting in packaging/), use that checkout in
+# place instead of a separate ~/Block1Exam clone — its .env and data/ are real,
+# a fresh clone elsewhere would never see them. A distributed, downloaded copy
+# (what real end users get, sitting in ~/Downloads with no surrounding repo)
+# won't match anything here and falls through to the normal clone below.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/Block1Exam"
+dir="$SCRIPT_DIR"
+for _ in 1 2 3 4 5 6; do
+  dir="$(dirname "$dir")"
+  if [ -d "$dir/.git" ] && git -C "$dir" remote get-url origin 2>/dev/null | grep -q "Block1Exam"; then
+    INSTALL_DIR="$dir"
+    echo "Running from a local checkout ($INSTALL_DIR) — using it in place."
+    break
+  fi
+done
 
 if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" fetch --quiet origin "$REPO_BRANCH"
