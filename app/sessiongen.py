@@ -44,7 +44,14 @@ QUESTION_SYSTEM = (
     "study'. Never write a question about the course or its materials themselves.\n"
     "5. Every question must be exam-relevant foundational science (anatomy, physiology, "
     "biochemistry, cell biology, pathology, pharmacology, microbiology, etc.).\n"
-    "6. Exactly one answer is unambiguously best."
+    "6. Exactly one answer is unambiguously best.\n"
+    "7. Every option must be consistent with facts the stem already states. If the stem "
+    "specifies something (a family history, a lab value, a demographic, an exposure), no "
+    "option may contradict it - re-read the stem against every option before finalizing. An "
+    "option the stem has already ruled out isn't a distractor, it's a writing error: e.g. a "
+    "stem that says 'parents are healthy, no family history' cannot then offer 'the father is "
+    "affected' as an option. Distractors must be wrong because of the science being tested, "
+    "never because the stem already contradicts them."
 )
 
 EXAMPLE_QUESTIONS = """EXAMPLE STYLE - board-style, self-contained stems, single best answer, 5 options A-E:
