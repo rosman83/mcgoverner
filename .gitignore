@@ -7,4 +7,5 @@ __pycache__/
 packaging/McGoverner.app/
 packaging/McGoverner.app.zip
 packaging/windows/McGoverner-Windows.zip
+packaging/windows/McGovernerSetup.exe
 .DS_Store
