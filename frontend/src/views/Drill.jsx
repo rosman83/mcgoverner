@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Pills } from "../components/Pills";
+import { onLecturesChanged } from "../lib/events";
 
 const MODE_OPTIONS = [
   { value: "practice", label: "Practice" },
@@ -127,7 +128,10 @@ function Setup({ onStarted }) {
   const [status, setStatus] = useState("");
   const [starting, setStarting] = useState(false);
 
-  useEffect(() => { api.get("/api/lectures").then(setLectures); }, []);
+  useEffect(() => {
+    api.get("/api/lectures").then(setLectures);
+    return onLecturesChanged(() => api.get("/api/lectures").then(setLectures));
+  }, []);
 
   const weeks = useMemo(
     () => [...new Set(lectures.map((l) => l.week).filter(Boolean))].sort((a, b) => a - b),

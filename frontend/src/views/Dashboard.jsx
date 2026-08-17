@@ -4,6 +4,7 @@ import { InfoPopup } from "../components/InfoPopup";
 import { Dropzone } from "../components/Dropzone";
 import { Pills } from "../components/Pills";
 import { Spinner } from "../components/Spinner";
+import { notifyLecturesChanged, onLecturesChanged } from "../lib/events";
 
 const PAGE = 6;
 const UPLOAD_MODES = [
@@ -93,7 +94,13 @@ export function Dashboard() {
     }
   }
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+    // Learn/Drill each keep their own copy of the lecture list and stay
+    // mounted for the whole session - this is how they hear about an import
+    // that happened here, or a rename/retag that happened in Learn.
+    return onLecturesChanged(load);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleImport(files) {
     setImporting(true);
@@ -108,6 +115,7 @@ export function Dashboard() {
       if (res.errors?.length) msg += ` Errors: ${res.errors.join("; ")}`;
       setImportMsg(msg);
       load();
+      if (res.imported.length) notifyLecturesChanged();
     } catch (e) {
       setImportMsg("Import failed: " + e.message);
     } finally {

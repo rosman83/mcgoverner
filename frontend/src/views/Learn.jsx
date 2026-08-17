@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { SessionRow } from "../components/SessionRow";
+import { notifyLecturesChanged, onLecturesChanged } from "../lib/events";
 
 // ---------- Minimal markdown + slide-citation renderer ----------
 // Backend summaries use: ## / ### headings, **bold**, plain paragraphs, and
@@ -322,6 +323,47 @@ function EditableWeekPill({ week, onSave }) {
   );
 }
 
+// Click the title to rename in place - same click-to-edit pattern as the
+// week/tag pills, just a text input instead of a select. stopPropagation
+// keeps a click here from also triggering the row's "open this lecture" nav.
+function EditableLectureTitle({ title, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(title);
+
+  async function commit() {
+    setEditing(false);
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== title) await onSave(trimmed);
+    else setVal(title);
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        className="td-title td-title-edit"
+        value={val}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") { setVal(title); setEditing(false); }
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      className="td-title td-title-edit-trigger"
+      onClick={(e) => { e.stopPropagation(); setVal(title); setEditing(true); }}
+    >
+      {title}
+    </div>
+  );
+}
+
 function LectureRow({ l, onPick, onUpdate }) {
   return (
     <li className="lecture-row lecture-row-tagged">
@@ -330,7 +372,7 @@ function LectureRow({ l, onPick, onUpdate }) {
         <EditableTagPill value={l.tag} onSave={(tag) => onUpdate(l.id, { tag })} />
       </div>
       <div className="lecture-main" onClick={() => onPick(l.id)}>
-        <div className="td-title">{l.title}</div>
+        <EditableLectureTitle title={l.title} onSave={(title) => onUpdate(l.id, { title })} />
         <div className="muted" style={{ fontSize: 12.5 }}>
           {l.slide_count} slides · {l.summary_status === "done" ? "summary ready" : l.summary_status}
         </div>
@@ -507,11 +549,18 @@ export function Learn({ onOpenSession }) {
   const [lectures, setLectures] = useState([]);
   const [lectureId, setLectureId] = useState(null);
 
-  useEffect(() => { api.get("/api/lectures").then(setLectures); }, []);
+  function refresh() { api.get("/api/lectures").then(setLectures); }
+  useEffect(() => {
+    refresh();
+    // Dashboard's importer and this view's own rename/retag both change the
+    // lecture list - refetch whenever either happens elsewhere too.
+    return onLecturesChanged(refresh);
+  }, []);
 
   async function updateLecture(id, patch) {
     const updated = await api.patch(`/api/lectures/${id}`, patch);
     setLectures((prev) => prev.map((l) => (l.id === id ? { ...l, ...updated } : l)));
+    notifyLecturesChanged();
   }
 
   const lecture = lectures.find((l) => l.id === lectureId);

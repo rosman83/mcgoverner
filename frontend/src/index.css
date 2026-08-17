@@ -260,6 +260,13 @@ input:focus, select:focus, button:focus-visible {
 .dash-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .dash-table td { padding: 8px 6px; border-top: 1px solid var(--border); }
 .td-title { font-weight: 600; }
+.td-title-edit-trigger { cursor: pointer; }
+.td-title-edit-trigger:hover { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+input.td-title-edit {
+  width: 100%; padding: 2px 6px; margin: -2px -6px;
+  border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--surface); font-weight: 600; font-size: inherit;
+}
 
 .acc-badge {
   display: inline-block;
