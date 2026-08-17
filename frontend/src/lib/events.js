@@ -14,3 +14,18 @@ export function onLecturesChanged(cb) {
   window.addEventListener(LECTURES_CHANGED, cb);
   return () => window.removeEventListener(LECTURES_CHANGED, cb);
 }
+
+// Same problem, different list: Learn's "Resume a session" card and Review's
+// "Past sessions" list each fetch /api/sessions independently and both stay
+// mounted - deleting or starting a session in one left the other showing a
+// stale row until a manual refresh.
+const SESSIONS_CHANGED = "sessions-changed";
+
+export function notifySessionsChanged() {
+  window.dispatchEvent(new Event(SESSIONS_CHANGED));
+}
+
+export function onSessionsChanged(cb) {
+  window.addEventListener(SESSIONS_CHANGED, cb);
+  return () => window.removeEventListener(SESSIONS_CHANGED, cb);
+}

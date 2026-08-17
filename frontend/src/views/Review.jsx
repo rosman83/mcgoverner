@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { SessionRow } from "../components/SessionRow";
+import { notifySessionsChanged, onSessionsChanged } from "../lib/events";
 
 const PAGE = 6;
 
@@ -91,11 +92,17 @@ export function Review({ onOpenSession }) {
     setMissed(m);
     setHistory(h);
   }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    // Learn's "Resume a session" card has its own copy of this same list -
+    // deleting or starting a session here needs to tell it to refetch too.
+    return onSessionsChanged(refresh);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleDelete(id) {
     await api.del(`/api/sessions/${id}`);
     refresh();
+    notifySessionsChanged();
   }
 
   // Missed questions aren't tied to one originating session (a lecture can
@@ -108,7 +115,10 @@ export function Review({ onOpenSession }) {
     fd.append("time_mode", "tutor");
     fd.append("lecture_ids", lectureId);
     const res = await fetch("/api/sessions", { method: "POST", body: fd }).then((r) => r.json());
-    if (res.session_id) onOpenSession(res.session_id);
+    if (res.session_id) {
+      notifySessionsChanged();
+      onOpenSession(res.session_id);
+    }
   }
 
   return (

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Pills } from "../components/Pills";
-import { onLecturesChanged } from "../lib/events";
+import { onLecturesChanged, notifySessionsChanged } from "../lib/events";
 
 const MODE_OPTIONS = [
   { value: "practice", label: "Practice" },
@@ -176,6 +176,7 @@ function Setup({ onStarted }) {
         setStatus(res.message || "No questions available for this mode/source.");
         return;
       }
+      notifySessionsChanged();
       onStarted(res.session_id);
     } catch (e) {
       setStatus("Could not start session: " + e.message);

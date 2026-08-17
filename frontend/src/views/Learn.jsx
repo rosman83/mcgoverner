@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { SessionRow } from "../components/SessionRow";
-import { notifyLecturesChanged, onLecturesChanged } from "../lib/events";
+import { notifyLecturesChanged, onLecturesChanged, notifySessionsChanged, onSessionsChanged } from "../lib/events";
 
 // ---------- Minimal markdown + slide-citation renderer ----------
 // Backend summaries use: ## / ### headings, **bold**, plain paragraphs, and
@@ -525,11 +525,17 @@ function InProgressSessions({ onOpenSession }) {
     const all = await api.get("/api/sessions");
     setSessions(all.filter((s) => s.status !== "completed"));
   }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    // Review's "Past sessions" list has its own copy of this same list -
+    // deleting or starting a session there needs to tell this one to refetch.
+    return onSessionsChanged(refresh);
+  }, []);
 
   async function handleDelete(id) {
     await api.del(`/api/sessions/${id}`);
     refresh();
+    notifySessionsChanged();
   }
 
   if (!sessions || !sessions.length) return null;
