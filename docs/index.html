@@ -82,13 +82,80 @@
   }
   .contact a:hover { text-decoration: underline; }
 
-  .preview-video {
+  .compare {
+    margin-top: 36px;
+  }
+  .compare-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .compare-frame {
+    --pos: 50%;
+    position: relative;
+    aspect-ratio: 1200 / 720;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.14);
+    cursor: ew-resize;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: pan-y;
+  }
+  .compare-img {
     display: block;
     width: 100%;
-    height: auto;
-    margin-top: 36px;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.14);
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+  }
+  .compare-base { position: absolute; inset: 0; }
+  .compare-clip {
+    position: absolute;
+    inset: 0;
+    clip-path: inset(0 calc(100% - var(--pos)) 0 0);
+    transition: clip-path 0.2s ease;
+  }
+  .compare-frame.dragging .compare-clip,
+  .compare-frame.dragging .compare-handle {
+    transition: none;
+  }
+  .compare-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--pos);
+    width: 0;
+    transition: left 0.2s ease;
+  }
+  .compare-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -1px;
+    width: 2px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+  }
+  .compare-grip {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--orange);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   }
 
   .steps { margin-top: 52px; }
@@ -223,7 +290,24 @@
       <div class="contact">
         Contact <a href="mailto:rashid.osman@uth.tmc.edu">Rashid</a> and <a href="mailto:eshan.manchanda@uth.tmc.edu">Eshan</a> for inquiries
       </div>
-      <video class="preview-video" src="assets/preview.mp4" autoplay muted loop playsinline preload="metadata"></video>
+      <div class="compare">
+        <div class="compare-labels">
+          <span>Lecture slide</span>
+          <span>Generated question</span>
+        </div>
+        <div class="compare-frame" id="compareFrame">
+          <img class="compare-img compare-base" src="assets/compare-problem.png" alt="An exam question generated from a lecture slide">
+          <div class="compare-clip">
+            <img class="compare-img" src="assets/compare-slide.png" alt="A lecture slide on pedigrees and inheritance patterns">
+          </div>
+          <div class="compare-handle">
+            <div class="compare-line"></div>
+            <div class="compare-grip">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5l-5 7 5 7M16 5l5 7-5 7"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="steps">
@@ -273,5 +357,45 @@
       Code publicly available on <a href="https://github.com/rosman83/mcgoverner" target="_blank" rel="noopener">GitHub</a>, under rosman83/mcgoverner
     </footer>
   </div>
+  <script>
+    (function () {
+      var frame = document.getElementById('compareFrame');
+      if (!frame) return;
+      var dragging = false;
+
+      function setPos(clientX) {
+        var rect = frame.getBoundingClientRect();
+        var pct = ((clientX - rect.left) / rect.width) * 100;
+        pct = Math.max(0, Math.min(100, pct));
+        frame.style.setProperty('--pos', pct + '%');
+      }
+      function pointerX(e) {
+        return e.touches ? e.touches[0].clientX : e.clientX;
+      }
+      function start(e) {
+        dragging = true;
+        frame.classList.add('dragging');
+        setPos(pointerX(e));
+      }
+      function move(e) {
+        if (!dragging) return;
+        setPos(pointerX(e));
+      }
+      function end() {
+        dragging = false;
+        frame.classList.remove('dragging');
+      }
+
+      frame.addEventListener('mousedown', start);
+      frame.addEventListener('touchstart', start, { passive: true });
+      window.addEventListener('mousemove', move);
+      window.addEventListener('touchmove', move, { passive: true });
+      window.addEventListener('mouseup', end);
+      window.addEventListener('touchend', end);
+      // A plain click (no drag) still animates the slider to that point,
+      // via the CSS transition that dragging itself turns off.
+      frame.addEventListener('click', function (e) { setPos(e.clientX); });
+    })();
+  </script>
 </body>
 </html>
