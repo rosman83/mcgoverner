@@ -115,6 +115,19 @@ fi
 
 cd "$INSTALL_DIR"
 chmod +x run.sh
+
+# Reap a server left running from a launcher that crashed, was force-quit, or
+# lost its Mac to sleep before it reached its own cleanup code - otherwise
+# port 8000 stays squatted and this launch either fails to bind or silently
+# ends up talking to the old, now out-of-date server while reporting
+# success. Only touches a process whose command line points at this install
+# dir, so it can't kill an unrelated app that happens to also use port 8000.
+for pid in $(lsof -ti:8000 2>/dev/null); do
+  if ps -o command= -p "$pid" 2>/dev/null | grep -qF "$INSTALL_DIR"; then
+    kill "$pid" 2>/dev/null
+  fi
+done
+
 ./run.sh > "$RUN_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -142,4 +155,9 @@ if [ "$started" -eq 0 ]; then
   exit 1
 fi
 
+echo ""
+echo "Ready. Your browser should have opened to McGoverner."
+echo "If it didn't, go to: http://localhost:8000"
+echo ""
+echo "This window must stay open while you use McGoverner - closing it stops the app."
 wait "$SERVER_PID" 2>/dev/null

@@ -1,9 +1,14 @@
 name: Release Windows launcher
 
-# Zips the Windows launcher and publishes it to the same rolling release the
-# Mac launcher uses. Runs on push to packaging/windows/** or run.ps1 - the
+# Builds the installer and publishes it to the same rolling release the Mac
+# launcher uses. Runs on push to packaging/windows/** or run.ps1 - the
 # launcher only downloads the branch's code at runtime, it doesn't bundle it,
 # so this doesn't need to run on every commit.
+#
+# Setup.exe only - a raw-zip fallback used to be published alongside it, but
+# having two Windows downloads on the release page just meant some people
+# grabbed the zip (no Start Menu shortcut, no uninstaller, easy to lose
+# track of the extracted folder) without meaning to.
 on:
   push:
     branches: [main]
@@ -19,10 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Zip the launcher (fallback for anyone who'd rather not run an installer)
-        shell: pwsh
-        run: Compress-Archive -Path packaging\windows\McGoverner.bat,packaging\windows\launch.ps1 -DestinationPath packaging\windows\McGoverner-Windows.zip -Force
-
       - name: Build the installer (Inno Setup ships preinstalled on windows-latest)
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\McGoverner.iss'
@@ -35,7 +36,6 @@ jobs:
           make_latest: "true"
           files: |
             packaging/windows/McGovernerSetup.exe
-            packaging/windows/McGoverner-Windows.zip
           # No `body:` here on purpose - this and the Mac workflow both publish
           # to the same release tag, and omitting body leaves whatever's
           # already there untouched instead of one workflow clobbering the

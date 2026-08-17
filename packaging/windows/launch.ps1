@@ -19,6 +19,14 @@ $RunLog = Join-Path $env:TEMP "mcgoverner-run.log"
 function Get-CombinedLog {
     $out = if (Test-Path $RunLog) { Get-Content $RunLog -Raw -ErrorAction SilentlyContinue } else { "" }
     $err = if (Test-Path "$RunLog.err") { Get-Content "$RunLog.err" -Raw -ErrorAction SilentlyContinue } else { "" }
+    # Get-Content -Raw on a file that exists but is still empty (very likely
+    # right after Start-Process creates it, before run.ps1 has written
+    # anything) returns $null, not "" - and $null reaching [regex]::Matches
+    # below throws ArgumentNullException, which $ErrorActionPreference =
+    # 'Stop' turns into the whole launcher crashing over a log that just
+    # hadn't been written to yet.
+    if (-not $out) { $out = "" }
+    if (-not $err) { $err = "" }
     if ($err) { return "$out`n--- errors ---`n$err" }
     return $out
 }
@@ -100,6 +108,20 @@ Write-Host "Downloaded."
 
 Set-Location $InstallDir
 
+# Reap a server left running from a launcher that crashed or was killed
+# before it reached its own cleanup code (exactly what the Get-CombinedLog
+# bug above used to cause) - otherwise port 8000 stays squatted and this
+# launch either fails to bind or silently ends up talking to the old, now
+# out-of-date server while reporting success. Only touches a process whose
+# command line points at this install dir, so it can't kill an unrelated
+# app that happens to also be using port 8000.
+Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
+    $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)" -ErrorAction SilentlyContinue
+    if ($owner -and $owner.CommandLine -like "*$InstallDir*") {
+        Stop-Process -Id $owner.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Starting the server (first run can take a minute or two while dependencies install)..."
 $psArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $InstallDir "run.ps1"))
 $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $psArgs -RedirectStandardOutput $RunLog -RedirectStandardError "$RunLog.err" -WindowStyle Hidden -PassThru
@@ -120,7 +142,6 @@ for ($i = 0; $i -lt 120; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:8000" -UseBasicParsing -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
-            Start-Process "http://localhost:8000"
             $started = $true
             break
         }
@@ -153,5 +174,33 @@ if (-not $started) {
     exit 1
 }
 
-Write-Host "Ready. Your browser should have opened - if not, go to http://localhost:8000"
+# Opening the browser is best-effort and separate from "did the server
+# start" - it used to share a try/catch with the health check above, so a
+# browser-open failure (no default handler registered, an odd file-type
+# association on a locked-down school machine, etc.) silently kept $started
+# false forever, the retry loop timed out, and the script killed a perfectly
+# working server while telling the user "McGoverner didn't start". Now a
+# failure here just falls through to the manual-link instructions.
+$opened = $false
+try {
+    Start-Process "http://localhost:8000"
+    $opened = $true
+} catch {}
+
+Write-Host ""
+if ($opened) {
+    Write-Host "Ready. Your browser should have opened to McGoverner."
+    Write-Host "If it didn't, go to: http://localhost:8000"
+} else {
+    Write-Host "======================================================"
+    Write-Host "  McGoverner is running, but couldn't open your browser."
+    Write-Host "  Open this link yourself:"
+    Write-Host ""
+    Write-Host "      http://localhost:8000"
+    Write-Host ""
+    Write-Host "  (copy it into any browser's address bar)"
+    Write-Host "======================================================"
+}
+Write-Host ""
+Write-Host "This window must stay open while you use McGoverner - closing it stops the app."
 Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
