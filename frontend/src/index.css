@@ -53,6 +53,16 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* Every tab stays mounted and toggles via display:none (see App.jsx), so
+   switching tabs jumps between whatever page height each has - if the
+   scrollbar shows on tall pages and disappears on short ones, that reserved
+   gutter width appearing/disappearing shifts the whole page horizontally.
+   Hiding the scrollbar chrome (scroll itself still works) removes that. */
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar { display: none; }
 body {
   margin: 0;
   background: var(--bg);
@@ -68,13 +78,17 @@ a { color: var(--accent); }
 /* ---------- Layout shell ---------- */
 .shell { display: flex; flex-direction: column; min-height: 100%; }
 .topbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.topbar-inner {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  max-width: 1080px;
+  margin: 0 auto;
 }
 .topbar-side { display: flex; align-items: center; gap: 8px; }
 .topbar-icons { justify-content: flex-end; }
@@ -376,6 +390,7 @@ input:focus, select:focus, button:focus-visible {
 /* ---------- Drill ---------- */
 .lp-all { display: flex; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 6px; }
 .lp-all input { width: auto; }
+.lp-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .lp-list { max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; }
 .lp-item { display: flex; align-items: center; gap: 8px; font-weight: 400; padding: 4px 0; }
 .lp-item input { width: auto; }
@@ -472,6 +487,9 @@ input:focus, select:focus, button:focus-visible {
 
 /* ---------- Review tab: roomier than the default detail-list ---------- */
 .review-tab .detail-list li { padding: 18px 0; }
+/* Only the "To review" heading sits flush left - the stat line under it
+   lines up with the row text below instead of the heading above it. */
+.to-review-headline { margin-left: 4px; }
 
 /* ---------- Learn: lecture list grouped by week ---------- */
 .lecture-group + .lecture-group { margin-top: 18px; }

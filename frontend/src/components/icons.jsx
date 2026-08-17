@@ -54,3 +54,16 @@ export function UploadIcon(props) {
     </svg>
   );
 }
+
+// Same mark as the landing page's cowboy-hat avatars (docs/index.html) - the
+// one bit of brand identity the navbar keeps, reused verbatim.
+export function HatIcon(props) {
+  return (
+    <svg viewBox="0 0 64 38" width="44" height="26" aria-hidden="true" {...props}>
+      <ellipse cx="32" cy="27" rx="30" ry="6" fill="#C89B4A" />
+      <path d="M17 20 Q17 8 32 8 Q47 8 47 20 Z" fill="#D9AE5C" />
+      <rect x="17" y="20" width="30" height="6" fill="#7A4A24" />
+      <polygon points="32,18.5 33.29,21.22 36.28,21.61 34.09,23.68 34.65,26.64 32,25.2 29.35,26.64 29.91,23.68 27.72,21.61 30.71,21.22" fill="#FFD54A" stroke="#B8860B" strokeWidth="0.5" />
+    </svg>
+  );
+}

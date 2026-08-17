@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Pills } from "../components/Pills";
 
@@ -9,6 +9,12 @@ const MODE_OPTIONS = [
 const TIME_OPTIONS = [
   { value: "tutor", label: "Tutor mode" },
   { value: "quiz", label: "Quiz mode" },
+];
+const TAG_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "foundations", label: "Foundations" },
+  { value: "doctoring", label: "Doctoring" },
+  { value: "anatomy", label: "Anatomy" },
 ];
 
 function fmtClock(totalSeconds) {
@@ -116,10 +122,17 @@ function Setup({ onStarted }) {
   const [lectures, setLectures] = useState([]);
   const [allLectures, setAllLectures] = useState(false);
   const [checked, setChecked] = useState(new Set());
+  const [weekFilter, setWeekFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [status, setStatus] = useState("");
   const [starting, setStarting] = useState(false);
 
   useEffect(() => { api.get("/api/lectures").then(setLectures); }, []);
+
+  const weeks = useMemo(
+    () => [...new Set(lectures.map((l) => l.week).filter(Boolean))].sort((a, b) => a - b),
+    [lectures]
+  );
 
   function toggleLecture(id) {
     setChecked((c) => {
@@ -128,6 +141,21 @@ function Setup({ onStarted }) {
       return next;
     });
   }
+
+  // Picking a week/category is a quick-select, not a toggle: it sets the
+  // checked set to exactly what matches (both filters combine), so a student
+  // can jump straight to "just week 3" or "just Doctoring" instead of
+  // hand-checking a dozen lectures one at a time.
+  function applyFilters(week, tag) {
+    if (!week && !tag) return;
+    const matches = lectures.filter(
+      (l) => (!week || String(l.week) === String(week)) && (!tag || l.tag === tag)
+    );
+    setChecked(new Set(matches.map((l) => l.id)));
+    setAllLectures(false);
+  }
+  function onWeekFilter(v) { setWeekFilter(v); applyFilters(v, tagFilter); }
+  function onTagFilter(v) { setTagFilter(v); applyFilters(weekFilter, v); }
 
   async function start() {
     setStarting(true);
@@ -168,6 +196,15 @@ function Setup({ onStarted }) {
           <label className="lp-all">
             <input type="checkbox" checked={allLectures} onChange={(e) => setAllLectures(e.target.checked)} /> All lectures
           </label>
+          {weeks.length > 0 && (
+            <div className="lp-filters">
+              <select value={weekFilter} onChange={(e) => onWeekFilter(e.target.value)} style={{ maxWidth: 140 }}>
+                <option value="">Filter by week…</option>
+                {weeks.map((w) => <option key={w} value={w}>Week {w}</option>)}
+              </select>
+              <Pills options={TAG_OPTIONS} value={tagFilter} onChange={onTagFilter} />
+            </div>
+          )}
           {!allLectures && (
             <div className="lp-list">
               {lectures.map((l) => (
