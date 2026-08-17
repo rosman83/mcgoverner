@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, uploadWithProgress } from "../lib/api";
 import { InfoPopup } from "../components/InfoPopup";
 import { Dropzone } from "../components/Dropzone";
 import { Pills } from "../components/Pills";
 import { Spinner } from "../components/Spinner";
+import { UploadProgress } from "../components/UploadProgress";
 import { notifyLecturesChanged, onLecturesChanged } from "../lib/events";
 
 const PAGE = 6;
@@ -70,10 +71,11 @@ export function Dashboard() {
   const [proj, setProj] = useState(null);
   const [err, setErr] = useState(null);
   const [importMsg, setImportMsg] = useState("");
-  const [importing, setImporting] = useState(false);
+  const [importUpload, setImportUpload] = useState(null); // {phase, pct} while a lecture upload is in flight
   const [lectures, setLectures] = useState([]);
   const [qsLectureId, setQsLectureId] = useState("");
   const [qsMsg, setQsMsg] = useState("");
+  const [qsUpload, setQsUpload] = useState(null);
   const [uploadMode, setUploadMode] = useState("lectures");
   const [weakShown, setWeakShown] = useState(PAGE);
   const [gapsShown, setGapsShown] = useState(PAGE);
@@ -103,12 +105,12 @@ export function Dashboard() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleImport(files) {
-    setImporting(true);
-    setImportMsg("Importing...");
+    setImportMsg("");
+    setImportUpload({ phase: "uploading", pct: 0 });
     try {
       const fd = new FormData();
       for (const f of files) fd.append("files", f);
-      const res = await fetch("/api/lectures/import", { method: "POST", body: fd }).then((r) => r.json());
+      const res = await uploadWithProgress("/api/lectures/import", fd, setImportUpload);
       let msg = `Imported ${res.imported.length} lecture(s).`;
       if (res.imported.length) msg += " OCR, captions, and summaries are generating in the background.";
       if (res.duplicates?.length) msg += ` Skipped ${res.duplicates.length} duplicate(s).`;
@@ -119,18 +121,19 @@ export function Dashboard() {
     } catch (e) {
       setImportMsg("Import failed: " + e.message);
     } finally {
-      setImporting(false);
+      setImportUpload(null);
     }
   }
 
   async function handleQsImport(files) {
     if (!qsLectureId) return setQsMsg("Import a lecture first");
-    setQsMsg("Parsing questions...");
+    setQsMsg("");
+    setQsUpload({ phase: "uploading", pct: 0 });
     try {
       const fd = new FormData();
       fd.append("lecture_id", qsLectureId);
       for (const f of files) fd.append("files", f);
-      const res = await fetch("/api/question_sets/import", { method: "POST", body: fd }).then((r) => r.json());
+      const res = await uploadWithProgress("/api/question_sets/import", fd, setQsUpload);
       let msg = `Imported ${res.imported} professor question(s).`;
       if (res.skipped_duplicates) msg += ` Skipped ${res.skipped_duplicates} already imported.`;
       if (res.errors?.length) msg += ` Errors: ${res.errors.join("; ")}`;
@@ -138,6 +141,8 @@ export function Dashboard() {
       load();
     } catch (e) {
       setQsMsg("Import failed: " + e.message);
+    } finally {
+      setQsUpload(null);
     }
   }
 
@@ -169,7 +174,8 @@ export function Dashboard() {
               <div className="muted upload-hint">
                 Imports the slide deck itself (PDF/PPTX) — this is where questions and coverage come from.
               </div>
-              <Dropzone label="Drop PDF/PPTX lecture files here, or click to browse" accept=".pdf,.pptx" disabled={importing} onFiles={handleImport} />
+              <Dropzone label="Drop PDF/PPTX lecture files here, or click to browse" accept=".pdf,.pptx" disabled={!!importUpload} onFiles={handleImport} />
+              <UploadProgress state={importUpload} />
               {importMsg && <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>{importMsg}</div>}
             </>
           ) : (
@@ -183,7 +189,8 @@ export function Dashboard() {
                 Imports a professor-provided answer key or practice sheet for the lecture above, so those
                 exact questions get folded into your drills alongside the AI-generated ones.
               </div>
-              <Dropzone label="Drop a question handout here" accept=".pdf,.pptx" disabled={!qsLectureId} onFiles={handleQsImport} />
+              <Dropzone label="Drop a question handout here" accept=".pdf,.pptx" disabled={!qsLectureId || !!qsUpload} onFiles={handleQsImport} />
+              <UploadProgress state={qsUpload} />
               {qsMsg && <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>{qsMsg}</div>}
             </div>
           )}

@@ -41,3 +41,29 @@ export const api = {
   patch: (path, body) => request(path, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path) => request(path, { method: "DELETE" }),
 };
+
+// fetch() has no upload-progress event, only XHR does - used for file
+// uploads (lecture/handout import) so the UI can show real transfer
+// progress instead of an unmoving "Importing…" label. onProgress gets
+// {phase: "uploading", pct} while bytes are sending, then {phase:
+// "processing"} once the browser has sent everything and is waiting on the
+// server's response (parsing/OCR/etc, which has no progress signal at all).
+export function uploadWithProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.({ phase: "uploading", pct: Math.round((e.loaded / e.total) * 100) });
+    };
+    xhr.upload.onload = () => onProgress?.({ phase: "processing", pct: 100 });
+    xhr.onload = () => {
+      try {
+        resolve(JSON.parse(xhr.responseText));
+      } catch {
+        reject(new Error(`Upload failed: bad response (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Could not reach the server during upload."));
+    xhr.send(formData);
+  });
+}

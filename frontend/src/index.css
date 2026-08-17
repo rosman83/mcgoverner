@@ -537,6 +537,26 @@ input.tag-pill.tag-edit::-webkit-outer-spin-button { -webkit-appearance: none; m
 
 /* ---------- Dashboard: persistent hint above the upload dropzone ---------- */
 .upload-hint { font-size: 12.5px; margin-bottom: 8px; text-align: center; }
+
+.upload-progress { margin-top: 10px; }
+.upload-progress-bar {
+  position: relative; height: 6px; border-radius: 999px;
+  background: var(--bg); overflow: hidden;
+}
+.upload-progress-fill {
+  position: absolute; top: 0; left: 0; height: 100%;
+  background: var(--accent); border-radius: 999px;
+  transition: width 0.15s ease;
+}
+.upload-progress-fill.indeterminate {
+  width: 35%;
+  animation: upload-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes upload-indeterminate {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}
+.upload-progress-label { font-size: 12px; margin-top: 5px; }
 .narrow-col { max-width: 420px; margin: 0 auto; }
 
 /* ---------- Global error surfaces ---------- */
