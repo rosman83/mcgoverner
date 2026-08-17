@@ -309,7 +309,7 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
         <button className="btn" disabled={pending === null && !revealed} onClick={submit}>
           {revealed ? "Change answer" : answeredBefore ? "Submit change" : "Submit"}
         </button>
-        <button className="btn ghost" onClick={onNext}>Next</button>
+        <button className="btn ghost" onClick={() => onNext()}>Next</button>
       </div>
       {nav.length > 0 && (
         <div className="qnav-wrap">
