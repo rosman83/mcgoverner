@@ -49,16 +49,24 @@ function renderInline(text, key, lectureId, openLightbox) {
   return parts;
 }
 
+// Bold (**x** / __x__) and italic (*x* / _x_) - summaries legitimately use
+// single-asterisk italics for gene symbols (*CNTNAP2*), which a bold-only
+// parser left rendering as literal asterisks. Double-marker alternatives are
+// listed first so "**x**" matches as bold, not "*" + italic "*x*" + "*".
 function renderBold(text, key) {
-  const segs = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  const segs = text.split(/(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g).filter(Boolean);
   if (segs.length === 1) return text;
   return (
     <span key={key}>
-      {segs.map((s, idx) =>
-        s.startsWith("**") && s.endsWith("**")
-          ? <strong key={idx}>{s.slice(2, -2)}</strong>
-          : <span key={idx}>{s}</span>
-      )}
+      {segs.map((s, idx) => {
+        if ((s.startsWith("**") && s.endsWith("**")) || (s.startsWith("__") && s.endsWith("__"))) {
+          return <strong key={idx}>{s.slice(2, -2)}</strong>;
+        }
+        if ((s.startsWith("*") && s.endsWith("*")) || (s.startsWith("_") && s.endsWith("_"))) {
+          return <em key={idx}>{s.slice(1, -1)}</em>;
+        }
+        return <span key={idx}>{s}</span>;
+      })}
     </span>
   );
 }

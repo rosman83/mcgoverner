@@ -35,15 +35,19 @@ function renderExplanation(text, lectureId, onCite) {
   ));
 }
 function renderInline(text, lectureId, onCite, keyPrefix) {
-  const re = /(\*\*[^*]+\*\*)|(`[^`]+`)|(\(slides?\s+([\d,\s-]+)\))/g;
+  // Double-marker bold checked before single-marker italic, same reasoning
+  // as Learn.jsx's renderBold - otherwise "**x**" matches as italic "*x*"
+  // plus two stray asterisks instead of bold.
+  const re = /(\*\*[^*]+\*\*)|(\*[^*]+\*)|(`[^`]+`)|(\(slides?\s+([\d,\s-]+)\))/g;
   const out = [];
   let last = 0, m, i = 0;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1]) out.push(<strong key={`${keyPrefix}-${i++}`}>{m[1].slice(2, -2)}</strong>);
-    else if (m[2]) out.push(<code key={`${keyPrefix}-${i++}`}>{m[2].slice(1, -1)}</code>);
-    else if (m[3]) {
-      const nums = (m[4].match(/\d+/g) || []).map(Number);
+    else if (m[2]) out.push(<em key={`${keyPrefix}-${i++}`}>{m[2].slice(1, -1)}</em>);
+    else if (m[3]) out.push(<code key={`${keyPrefix}-${i++}`}>{m[3].slice(1, -1)}</code>);
+    else if (m[4]) {
+      const nums = (m[5].match(/\d+/g) || []).map(Number);
       out.push(
         <span key={`${keyPrefix}-${i++}`}>
           (
