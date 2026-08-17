@@ -50,20 +50,45 @@ def lecture_stats():
     return out
 
 
-def weak_slides(limit=15, max_accuracy=0.85, min_answers=1):
-    """Slides with the worst answer accuracy (only genuinely weak ones)."""
+_THUMB_SUBQUERY = (
+    "(SELECT si.path FROM slide_images si WHERE si.slide_id=s.id ORDER BY si.seq LIMIT 1) AS thumb"
+)
+
+
+def _with_thumb_url(d):
+    d["thumb"] = ("/images/" + d["thumb"]) if d.get("thumb") else None
+    return d
+
+
+def weak_slides(limit=30, max_accuracy=0.85, min_answers=1):
+    """Slides with the worst answer accuracy (only genuinely weak ones).
+    Excludes 0% accuracy - a single unlucky guess reading as "0%" is noise,
+    not a meaningful weak-slide signal to act on.
+
+    HAVING/ORDER BY use the full aggregate expressions rather than the
+    `answers`/`correct` SELECT aliases on purpose: the `answers` table (joined
+    as `a`) has its own real column literally named `correct`, and SQLite
+    resolves a bare identifier in HAVING/ORDER BY against an in-scope column
+    before an output alias - `correct` and even `answers` silently bound to
+    the wrong thing, so this was sorting on essentially nothing. Confirmed by
+    running the two forms side by side against real data: the alias version
+    returned 1.0, 1.0, 1.0, 0.67, 1.0, ... (not sorted); the explicit-
+    expression version returns a real ascending sequence."""
     conn = get_conn()
     rows = conn.execute(
         "SELECT s.id AS slide_id, s.slide_num, s.text, l.title AS lecture_title, "
         "l.id AS lecture_id, "
         "COUNT(a.id) AS answers, "
-        "SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END) AS correct "
+        "SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END) AS correct, "
+        f"{_THUMB_SUBQUERY} "
         "FROM slides s "
         "JOIN lectures l ON l.id=s.lecture_id "
         "JOIN questions q ON q.slide_id=s.id "
         "JOIN answers a ON a.question_id=q.id "
-        "GROUP BY s.id HAVING answers >= ? "
-        "ORDER BY correct*1.0/answers ASC LIMIT ?",
+        "GROUP BY s.id "
+        "HAVING COUNT(a.id) >= ? AND SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END) > 0 "
+        "ORDER BY SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END)*1.0/COUNT(a.id) ASC "
+        "LIMIT ?",
         (min_answers, limit),
     ).fetchall()
     conn.close()
@@ -71,21 +96,22 @@ def weak_slides(limit=15, max_accuracy=0.85, min_answers=1):
     for r in rows:
         d = dict(r)
         d["accuracy"] = round(d["correct"] / d["answers"], 2) if d["answers"] else None
-        out.append(d)
+        out.append(_with_thumb_url(d))
     return out
 
 
-def gaps():
+def gaps(limit=50):
     """Slides with no questions yet (coverage gaps)."""
     conn = get_conn()
     rows = conn.execute(
         "SELECT s.id AS slide_id, s.slide_num, s.text, l.title AS lecture_title, "
-        "l.id AS lecture_id "
+        "l.id AS lecture_id, "
+        f"{_THUMB_SUBQUERY} "
         "FROM slides s JOIN lectures l ON l.id=s.lecture_id "
         "WHERE (length(trim(s.text)) >= ? OR length(trim(s.ocr_text)) >= ?) "
         "AND NOT EXISTS (SELECT 1 FROM questions q WHERE q.slide_id=s.id) "
-        "ORDER BY l.id, s.slide_num LIMIT 50",
-        (MIN_SLIDE_WORDS, MIN_SLIDE_WORDS),
+        "ORDER BY l.id, s.slide_num LIMIT ?",
+        (MIN_SLIDE_WORDS, MIN_SLIDE_WORDS, limit),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_with_thumb_url(dict(r)) for r in rows]

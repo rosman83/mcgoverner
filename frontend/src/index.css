@@ -509,3 +509,20 @@ input.tag-pill.tag-edit::-webkit-outer-spin-button { -webkit-appearance: none; m
 /* ---------- Dashboard: persistent hint above the upload dropzone ---------- */
 .upload-hint { font-size: 12.5px; margin-bottom: 8px; text-align: center; }
 .narrow-col { max-width: 420px; margin: 0 auto; }
+
+/* ---------- Global error surfaces ---------- */
+.error-toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 200;
+  display: flex; align-items: center; gap: 10px;
+  max-width: 380px; padding: 12px 14px;
+  background: var(--danger); color: var(--danger-fg);
+  border-radius: var(--radius-sm); font-size: 13.5px; line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+.error-toast .icon-btn { color: var(--danger-fg); flex-shrink: 0; width: 22px; height: 22px; }
+.error-toast .icon-btn:hover { background: rgba(255, 255, 255, 0.15); }
+
+.crash-screen {
+  max-width: 480px; margin: 80px auto; text-align: center; padding: 0 20px;
+}
+.crash-screen p { margin: 10px 0 20px; }

@@ -92,4 +92,8 @@ if (-not $env:DEEPSEEK_API_KEY -and -not $env:OPENROUTER_API_KEY) {
 }
 
 Write-Output "PROGRESS: Starting the app..."
-& ".venv\Scripts\uvicorn.exe" app.main:app --reload --port 8000
+# No --reload: that's a dev-only flag that restarts the whole server on any
+# .py file change it notices under the watched directory - mid-request, with
+# no warning, which reads to a user as a random vague 500. Nobody is
+# live-editing source on an end-user machine.
+& ".venv\Scripts\uvicorn.exe" app.main:app --port 8000

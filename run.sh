@@ -47,4 +47,9 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
   echo "         Pick the provider with LLM_PROVIDER=deepseek|openrouter (default: whichever key is set)."
 fi
 
-exec .venv/bin/uvicorn app.main:app --reload --port 8000
+# No --reload: that's a dev-only flag that restarts the whole server on any
+# .py file change it notices under the watched directory (which defaults to
+# this entire folder, .venv included) - mid-request, with no warning, which
+# reads to a user as a random vague 500. Nobody is live-editing source on an
+# end-user machine, so it buys nothing here and only adds a failure mode.
+exec .venv/bin/uvicorn app.main:app --port 8000

@@ -5,6 +5,7 @@ import { Learn } from "./views/Learn";
 import { Drill } from "./views/Drill";
 import { Review } from "./views/Review";
 import { Settings } from "./views/Settings";
+import { ErrorToast } from "./components/ErrorToast";
 import { api } from "./lib/api";
 
 export default function App() {
@@ -65,6 +66,7 @@ export default function App() {
         </div>
         {view === "settings" && <Settings onConfigChange={handleConfigChange} />}
       </main>
+      <ErrorToast />
     </div>
   );
 }

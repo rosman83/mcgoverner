@@ -1,13 +1,29 @@
+import logging
 import os
 import json
+import traceback
+import uuid
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.db import init_db, get_conn, DB_PATH
+
+# A crash used to reach the user as a bare "Internal Server Error" with
+# nothing else - no way to tell what broke or report it. Every unhandled
+# exception now gets a short id (shown in the UI) and its full traceback
+# written to a log file that survives the launcher's /tmp log being cleared
+# (data/ is the same persistent dir the database lives in).
+ERROR_LOG_PATH = os.path.join(os.path.dirname(DB_PATH), "error.log")
+logging.basicConfig(
+    filename=ERROR_LOG_PATH,
+    level=logging.ERROR,
+    format="%(asctime)s %(message)s",
+)
+error_logger = logging.getLogger("mcgoverner.errors")
 from app.ingest.slides import import_lecture, list_lectures, slugify
 from app.ingest.concepts import chunk_lecture, coverage_stats
 from app.llm.summaries import generate_summary, get_summary
@@ -17,8 +33,33 @@ init_db()
 
 app = FastAPI(title="McGoverner")
 
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Every other route already turns expected failures into an HTTPException
+    with a real message - this only catches genuine bugs. Give the user
+    something they can screenshot and report instead of a bare 500, and put
+    the full traceback where it survives past the launcher's /tmp log."""
+    error_id = uuid.uuid4().hex[:8]
+    error_logger.error(
+        "[%s] %s %s\n%s", error_id, request.method, request.url.path,
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "server_error",
+            "message": "Something went wrong on the server's end.",
+            "error_id": error_id,
+            "log_hint": f"Details saved to {ERROR_LOG_PATH}",
+        },
+    )
+
+
+# React (Vite) build, committed to git - end-user machines never run npm, the
+# launcher's auto-update just syncs whatever's already built into dist/.
+DIST_DIR = os.path.join(os.path.dirname(__file__), "static", "dist")
+app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 
 from app.ingest.images import IMAGES_ROOT as _IMAGES_ROOT
 os.makedirs(_IMAGES_ROOT, exist_ok=True)
@@ -26,19 +67,13 @@ app.mount("/images", StaticFiles(directory=_IMAGES_ROOT), name="images")
 
 
 # ---------- Static ----------
-def _asset_version():
-    """Cache-buster derived from asset file mtimes, so CSS and JS always share
-    one version and change together on every origin."""
-    js = os.path.getmtime(os.path.join(STATIC_DIR, "app.js"))
-    css = os.path.getmtime(os.path.join(STATIC_DIR, "style.css"))
-    return str(int(max(js, css)))
-
-
 @app.get("/")
 def index():
-    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+    # Vite content-hashes asset filenames itself, so no manual cache-busting
+    # needed here (the old __CACHE_VERSION__ template was for the previous
+    # hand-written static/app.js + style.css).
+    with open(os.path.join(DIST_DIR, "index.html"), encoding="utf-8") as f:
         html = f.read()
-    html = html.replace("__CACHE_VERSION__", _asset_version())
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
