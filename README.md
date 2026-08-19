@@ -172,7 +172,7 @@ Questions are generated fresh on demand (never pre-banked), capped at 59 per ses
 
 ```bash
 # 1. Create .env with your provider key
-cp .env.example .env   # then add DEEPSEEK_API_KEY (and OPENROUTER_API_KEY for vision)
+cp .env.example .env   # then add OPENROUTER_API_KEY
 
 # 2. Run (creates venv + installs pinned deps from requirements.txt)
 ./run.sh

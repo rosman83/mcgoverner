@@ -159,36 +159,3 @@ def save_config(updates):
             os.environ.pop(key, None)
 
     return current_config()
-
-
-def _migrate_legacy_dual_key_users():
-    """Before this version, having both keys set meant DeepSeek was used for
-    text by default (the old provider-picking logic checked DEEPSEEK_API_KEY
-    first). Preserve that behavior for anyone who already had both keys set,
-    instead of silently switching their default text model out from under
-    them. Only ever fires once - after this, USE_DEEPSEEK_FOR_TEXT is always
-    explicitly set one way or the other, so the condition never matches again."""
-    if (
-        "USE_DEEPSEEK_FOR_TEXT" not in os.environ
-        and os.environ.get("DEEPSEEK_API_KEY")
-        and os.environ.get("OPENROUTER_API_KEY")
-    ):
-        seen = set()
-        out = []
-        for line in _read_env_lines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key == "USE_DEEPSEEK_FOR_TEXT":
-                    seen.add(key)
-                    out.append("USE_DEEPSEEK_FOR_TEXT=true")
-                    continue
-            out.append(line)
-        if "USE_DEEPSEEK_FOR_TEXT" not in seen:
-            out.append("USE_DEEPSEEK_FOR_TEXT=true")
-        with open(ENV_PATH, "w") as f:
-            f.write("\n".join(out) + ("\n" if out else ""))
-        os.environ["USE_DEEPSEEK_FOR_TEXT"] = "true"
-
-
-_migrate_legacy_dual_key_users()
