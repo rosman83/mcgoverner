@@ -504,14 +504,15 @@ input.td-title-edit {
 
 /* ---------- Learn: lecture list grouped by week ---------- */
 .lecture-group + .lecture-group { margin-top: 18px; }
+.lecture-group-head-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .lecture-group-head {
   font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  margin-bottom: 4px;
 }
 .lecture-row-tagged { display: flex; align-items: center; gap: 12px; }
 .lecture-main { flex: 1; min-width: 0; cursor: pointer; }
 .lecture-row-tagged:hover .td-title { color: var(--accent); }
 .lecture-tags { display: flex; gap: 8px; flex-shrink: 0; }
+.lecture-coverage { display: flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12.5px; }
 
 /* Fixed box for both the pill button and its select/input edit state, so
    swapping between them never resizes the pill and shoves its neighbor -

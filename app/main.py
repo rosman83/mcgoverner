@@ -95,10 +95,17 @@ def index():
 # ---------- Lectures ----------
 @app.get("/api/lectures")
 def api_lectures():
+    from app.stats import lecture_stats
+    cov_by_id = {s["lecture_id"]: s for s in lecture_stats()}
     lectures = list_lectures()
     out = []
     for l in lectures:
-        out.append(dict(l))
+        d = dict(l)
+        cov = cov_by_id.get(d["id"])
+        d["coverage_pct"] = cov["coverage_pct"] if cov else 0
+        d["slides_covered"] = cov["slides_covered"] if cov else 0
+        d["slides_total"] = cov["slides_total"] if cov else 0
+        out.append(d)
     return out
 
 

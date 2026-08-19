@@ -385,6 +385,10 @@ function LectureRow({ l, onPick, onUpdate }) {
           {l.slide_count} slides · {l.summary_status === "done" ? "summary ready" : l.summary_status}
         </div>
       </div>
+      <div className="lecture-coverage">
+        <span className="mini-bar"><span className="mini-fill" style={{ width: `${l.coverage_pct || 0}%` }} /></span>
+        <span className="muted"> {l.coverage_pct || 0}%</span>
+      </div>
     </li>
   );
 }
@@ -399,7 +403,13 @@ function LectureList({ lectures, onPick, onUpdate }) {
     }
     const weeks = [...byWeek.keys()].filter((k) => k !== null).sort((a, b) => a - b);
     if (byWeek.has(null)) weeks.push(null);
-    return weeks.map((w) => ({ week: w, items: byWeek.get(w) }));
+    return weeks.map((w) => {
+      const items = byWeek.get(w);
+      const covered = items.reduce((s, l) => s + (l.slides_covered || 0), 0);
+      const total = items.reduce((s, l) => s + (l.slides_total || 0), 0);
+      const coveragePct = total ? Math.round((1000 * covered) / total) / 10 : 0;
+      return { week: w, items, coveragePct };
+    });
   }, [lectures]);
 
   if (!lectures.length) {
@@ -409,7 +419,11 @@ function LectureList({ lectures, onPick, onUpdate }) {
     <div>
       {groups.map((g) => (
         <div key={g.week ?? "none"} className="lecture-group">
-          <div className="lecture-group-head muted">{g.week ? `Week ${g.week}` : "No week set"}</div>
+          <div className="lecture-group-head-row">
+            <div className="lecture-group-head muted">{g.week ? `Week ${g.week}` : "No week set"}</div>
+            <span className="mini-bar"><span className="mini-fill" style={{ width: `${g.coveragePct}%` }} /></span>
+            <span className="muted" style={{ fontSize: 12 }}>{g.coveragePct}%</span>
+          </div>
           <ul className="detail-list">
             {g.items.map((l) => <LectureRow key={l.id} l={l} onPick={onPick} onUpdate={onUpdate} />)}
           </ul>
