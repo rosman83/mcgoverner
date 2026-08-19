@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import subprocess
 import traceback
 import uuid
 from datetime import datetime, timedelta
@@ -32,6 +33,20 @@ import app.scheduler as sched
 init_db()
 
 app = FastAPI(title="McGoverner")
+
+
+# Short commit hash of the running code, so the navbar can show it and someone
+# can confirm a relaunch actually picked up the latest update. Computed once at
+# startup (not per-request) since it can't change without a restart anyway.
+# ponytail: distributed installs (fetch_code path in launch.sh) have no .git,
+# so this is "dev" there - fine, that path has no version signal to show yet.
+try:
+    APP_VERSION = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=5,
+    ).stdout.strip() or "dev"
+except Exception:
+    APP_VERSION = "dev"
 
 
 @app.exception_handler(Exception)
@@ -457,6 +472,7 @@ def api_usage():
     return {
         "provider": provider,
         "model": model,
+        "version": APP_VERSION,
         "today": shape(row),
         "all_time": shape(total),
         "today_by_kind": [dict(r) for r in by_kind],

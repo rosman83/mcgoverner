@@ -18,6 +18,9 @@ export function UsagePopover({ usage }) {
       {open && usage && (
         <div className="card" style={{ position: "absolute", right: 0, top: 40, width: 240, zIndex: 30 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>{usage.provider} / {usage.model}</div>
+          {usage.version && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>build {usage.version}</div>
+          )}
           <div className="muted" style={{ fontSize: 13 }}>
             Today: {fmtTokens(usage.today.total_tokens)} tokens, {usage.today.calls} calls
             {usage.today.cache_hit_pct ? ` (${usage.today.cache_hit_pct}% cached)` : ""}
