@@ -138,6 +138,10 @@ def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, 
     # path now sets that format on every call.
     sys = (system or "") + (
         "\n\nRespond with ONLY a valid json object. No markdown fences, no commentary."
+        "\n\nThe app's renderer only supports plain text/basic markdown (bold, italic, "
+        "headers, tables) - it does NOT render LaTeX. Never use LaTeX math delimiters "
+        "($...$, \\text{}, \\times, \\Delta, etc). Write formulas in plain text/unicode "
+        "instead, e.g. \"ΔP = Q × R\" and \"P_ip\" or \"P(ip)\" for subscripts."
     )
     last_err = None
     for _ in range(retries + 1):
