@@ -170,18 +170,21 @@ for ($i = 0; $i -lt 600; $i++) {
     Start-Sleep -Seconds 1
 }
 
-if (-not $started) {
+# Only the process actually dying counts as "failed" - a real user's log
+# showed uvicorn print "Uvicorn running on http://127.0.0.1:8000" seconds
+# after this exact branch used to declare failure (on hitting the loop's
+# time budget) and kill that same still-alive, about-to-succeed process. A
+# slow first run that hits run.ps1's retry/fallback chain isn't a crash, and
+# scaring the user with the error dialog + "contact us" over it was wrong -
+# reserve that for when the process actually exited without ever answering.
+if (-not $started -and $proc.HasExited) {
     Write-Host "FAILED to start. Full log:"
     Write-Host (Get-CombinedLog)
     Show-Error "McGoverner didn't start. This is usually a dependency that failed to install, or something blocking github.com / astral.sh (corporate VPN or firewall are common causes)."
-    # Don't leave a hung install/server running in the background after
-    # telling the user it failed.
-    if (-not $proc.HasExited) {
-        Get-CimInstance Win32_Process -Filter "ParentProcessId=$($proc.Id)" -ErrorAction SilentlyContinue |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    }
     exit 1
+}
+if (-not $started) {
+    Write-Host "Still finishing setup - taking longer than usual, but nothing has failed."
 }
 
 # Opening the browser is best-effort and separate from "did the server
@@ -203,16 +206,18 @@ if (-not $started) {
 # window title, and without it `start` treats the URL itself as the title
 # and opens nothing.
 $opened = $false
-try {
-    Start-Process -FilePath "cmd.exe" -ArgumentList '/c start "" "http://localhost:8000"' -WindowStyle Hidden
-    $opened = $true
-} catch {}
+if ($started) {
+    try {
+        Start-Process -FilePath "cmd.exe" -ArgumentList '/c start "" "http://localhost:8000"' -WindowStyle Hidden
+        $opened = $true
+    } catch {}
+}
 
 Write-Host ""
 if ($opened) {
     Write-Host "Ready. Your browser should have opened to McGoverner."
     Write-Host "If it didn't, go to: http://localhost:8000"
-} else {
+} elseif ($started) {
     Write-Host "======================================================"
     Write-Host "  McGoverner is running, but couldn't open your browser."
     Write-Host "  Open this link yourself:"
@@ -220,6 +225,16 @@ if ($opened) {
     Write-Host "      http://localhost:8000"
     Write-Host ""
     Write-Host "  (copy it into any browser's address bar)"
+    Write-Host "======================================================"
+} else {
+    # Not opening the browser yet on purpose - it's not answering, so a tab
+    # would just show a connection error. It'll finish shortly; open the
+    # link manually once it does.
+    Write-Host "======================================================"
+    Write-Host "  Still setting up - open this link once it finishes:"
+    Write-Host ""
+    Write-Host "      http://localhost:8000"
+    Write-Host ""
     Write-Host "======================================================"
 }
 Write-Host ""
