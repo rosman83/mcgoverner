@@ -37,15 +37,20 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 $env:UV_HTTP_TIMEOUT = "60"
 
-# Force uv's Python installs into AppData\Local instead of the default
-# AppData\Roaming. When Roaming is under OneDrive (common - work/school
-# accounts often sync the whole profile), OneDrive's Files On-Demand filter
-# driver sits in the path and uv can't create the interpreter's junction,
-# failing with "untrusted mount point (os error 448)" - and failing the
-# same way on every retry since the cause isn't transient. Local is never
-# synced by OneDrive. https://github.com/astral-sh/uv/issues/19616
-$env:UV_PYTHON_INSTALL_DIR = Join-Path $env:LOCALAPPDATA "uv\python"
-$env:UV_DATA_DIR = Join-Path $env:LOCALAPPDATA "uv"
+# Force uv's Python installs into ProgramData instead of anywhere under the
+# user profile. The known cause is OneDrive Files On-Demand sitting in the
+# path (its filter driver blocks uv from creating the interpreter's junction,
+# failing with "untrusted mount point (os error 448)") - but a first attempt
+# at this fix that redirected only Roaming -> Local still hit the identical
+# error for a user whose whole profile (Local included) turned out to be
+# behind some other mount/virtualization layer (FSLogix/Citrix profile
+# containers do this in locked-down school/hospital environments too).
+# ProgramData is a machine-level path outside any per-user profile container,
+# so it sidesteps the whole class of "path under C:\Users\<user> isn't real"
+# problems rather than chasing each virtualization tool one at a time.
+# https://github.com/astral-sh/uv/issues/19616
+$env:UV_PYTHON_INSTALL_DIR = Join-Path $env:ProgramData "McGoverner\uv\python"
+$env:UV_DATA_DIR = Join-Path $env:ProgramData "McGoverner\uv"
 
 # Pin the interpreter explicitly instead of trusting whatever's on PATH - same
 # reasoning as the Mac fix: the code uses `str | None`-style unions (needs
