@@ -300,7 +300,15 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
       </div>
       {revealed && result && (
         <div className="explanation">
-          <h4>Explanation</h4>
+          <div className="explain-head-row">
+            <h4>Explanation</h4>
+            {question.source_slide?.lecture_title && (
+              <span className="source-pill">
+                {question.source_slide.lecture_title}
+                {question.source_slide.lecture_week ? ` · Wk ${question.source_slide.lecture_week}` : ""}
+              </span>
+            )}
+          </div>
           {renderExplanation(result.explanation, question.lecture_id, cite)}
           <SourceBlock images={question.source_images} slide={question.source_slide} source={question.question_source} onCite={cite} />
         </div>

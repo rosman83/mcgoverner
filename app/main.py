@@ -755,7 +755,7 @@ def api_session_nav(sid: int):
 QUESTION_SELECT = (
     "SELECT sq.*, q.question, q.options, q.correct_index, q.explanation, q.level, q.slide_id, "
     "q.lecture_id, q.source AS question_source, "
-    "l.title AS source_lecture_title, "
+    "l.title AS source_lecture_title, l.week AS source_lecture_week, "
     "s.slide_num AS source_slide_num, s.text AS source_slide_text, "
     "s.caption AS source_slide_caption, "
     "a.selected_index AS prior_selected_index, a.correct AS prior_correct "
@@ -777,6 +777,7 @@ def _question_payload(row):
     q["source_slide"] = {
         "lecture_id": q.get("lecture_id"),
         "lecture_title": q.get("source_lecture_title") or "",
+        "lecture_week": q.get("source_lecture_week"),
         "slide_num": q.get("source_slide_num"),
         "text": q.get("source_slide_text") or "",
         "caption": q.get("source_slide_caption") or "",

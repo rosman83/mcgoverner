@@ -430,7 +430,8 @@ input.td-title-edit {
 .option:disabled { cursor: default; }
 
 .explanation { border-top: 1px solid var(--border); padding-top: 12px; margin-bottom: 14px; }
-.explanation h4 { margin: 0 0 6px; font-size: 13.5px; }
+.explanation h4 { margin: 0; font-size: 13.5px; }
+.explain-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .quiz-nav { display: flex; gap: 8px; margin-bottom: 14px; }
 
 .qnav-wrap { border-top: 1px solid var(--border); padding-top: 10px; }
