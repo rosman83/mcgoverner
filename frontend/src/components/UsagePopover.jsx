@@ -6,6 +6,35 @@ function fmtTokens(n) {
   return String(n);
 }
 
+// Red pill in the navbar when the running build is behind main - the app
+// can't restart itself (the launcher owns that), so this is purely a nudge:
+// close the window and relaunch to pick up the fix.
+export function UpdateAlert({ usage }) {
+  const [open, setOpen] = useState(false);
+  if (!usage?.update_available) return null;
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        className="update-alert-btn"
+        title="A new version is available"
+        onClick={() => setOpen((o) => !o)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      >
+        Update available
+      </button>
+      {open && (
+        <div className="card" style={{ position: "absolute", right: 0, top: 40, width: 240, zIndex: 30 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>A new version is out</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            You're on build {usage.version} - the latest is {usage.latest_version}.
+            Close this window and relaunch McGoverner to update.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Was a persistent text chip in the navbar ("gemini-3.7-flash · 12.4k tokens
 // today") - now a single icon, details on click instead of always-on text.
 export function UsagePopover({ usage }) {

@@ -94,6 +94,19 @@ function Fetch-Code {
         return $false
     }
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+
+    # Stamp the actual commit hash just downloaded into a .version file, so
+    # main.py can show something more useful than "dev" (git rev-parse always
+    # fails here - this zip download has no .git). Best-effort: written after
+    # robocopy's mirror pass so it's never itself mirrored away, and a failure
+    # here (offline, GitHub rate limit) just leaves the app showing "dev" -
+    # nothing else depends on this succeeding.
+    try {
+        $sha = (Invoke-RestMethod -Uri "https://api.github.com/repos/rosman83/mcgoverner/commits/$RepoBranch" `
+            -Headers @{ "User-Agent" = "McGoverner-Launcher" } -TimeoutSec 10).sha.Substring(0, 7)
+        Set-Content -Path (Join-Path $InstallDir ".version") -Value $sha -NoNewline
+    } catch { }
+
     return $true
 }
 

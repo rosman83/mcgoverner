@@ -38,15 +38,59 @@ app = FastAPI(title="McGoverner")
 # Short commit hash of the running code, so the navbar can show it and someone
 # can confirm a relaunch actually picked up the latest update. Computed once at
 # startup (not per-request) since it can't change without a restart anyway.
-# ponytail: distributed installs (fetch_code path in launch.sh) have no .git,
-# so this is "dev" there - fine, that path has no version signal to show yet.
+#
+# Distributed installs (the fetch_code/Fetch-Code zip-download path in
+# launch.sh/launch.ps1) have no .git, so `git rev-parse` always fails there -
+# every real end-user install showed "dev" regardless of what commit was
+# actually running, making this useless for confirming someone picked up a
+# fix. The launcher now writes the real commit hash it downloaded into a
+# .version file at the repo root; prefer that, and only fall back to git (for
+# local dev checkouts, which have no .version file) then "dev".
+from app.config import REPO_ROOT
+
+VERSION_FILE = os.path.join(REPO_ROOT, ".version")
 try:
-    APP_VERSION = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=5,
-    ).stdout.strip() or "dev"
-except Exception:
-    APP_VERSION = "dev"
+    with open(VERSION_FILE) as f:
+        APP_VERSION = f.read().strip() or "dev"
+except OSError:
+    try:
+        APP_VERSION = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or "dev"
+    except Exception:
+        APP_VERSION = "dev"
+
+_LATEST_VERSION_CACHE = {"sha": None, "checked_at": 0.0}
+LATEST_VERSION_CHECK_TTL = 600  # seconds
+
+
+def _latest_main_sha():
+    """GitHub's HEAD commit for main, so the UI can flag "a fix has shipped,
+    relaunch to get it" - cached for 10 minutes regardless of how often this is
+    called. The navbar's usage poll already hits /api/usage every 60s; without
+    caching that alone would burn through GitHub's 60/hr unauthenticated rate
+    limit within the hour from a single open tab. A failed check (offline,
+    rate-limited, GitHub hiccup) just keeps the last known value - never worth
+    alarming the user over a network blip."""
+    import time
+    import urllib.request
+
+    now = time.time()
+    if now - _LATEST_VERSION_CACHE["checked_at"] < LATEST_VERSION_CHECK_TTL:
+        return _LATEST_VERSION_CACHE["sha"]
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/rosman83/mcgoverner/commits/main",
+            headers={"User-Agent": "McGoverner", "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        _LATEST_VERSION_CACHE["sha"] = data["sha"][:7]
+    except Exception:
+        pass
+    _LATEST_VERSION_CACHE["checked_at"] = now
+    return _LATEST_VERSION_CACHE["sha"]
 
 
 @app.exception_handler(Exception)
@@ -466,6 +510,8 @@ def api_usage():
     conn.close()
 
     provider, model = active_model()
+    latest = _latest_main_sha()
+    update_available = bool(latest and APP_VERSION != "dev" and latest != APP_VERSION)
 
     def shape(r):
         prompt = r["prompt"]
@@ -482,6 +528,8 @@ def api_usage():
         "provider": provider,
         "model": model,
         "version": APP_VERSION,
+        "latest_version": latest,
+        "update_available": update_available,
         "today": shape(row),
         "all_time": shape(total),
         "today_by_kind": [dict(r) for r in by_kind],

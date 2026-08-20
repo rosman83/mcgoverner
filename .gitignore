@@ -2,6 +2,7 @@
 data/
 lectures/
 .env
+.version
 __pycache__/
 *.pyc
 packaging/McGoverner.app/

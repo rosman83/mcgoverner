@@ -1,5 +1,5 @@
 import { Pills } from "./Pills";
-import { UsagePopover } from "./UsagePopover";
+import { UsagePopover, UpdateAlert } from "./UsagePopover";
 import { GearIcon, SunIcon, MoonIcon, HatIcon } from "./icons";
 import { useTheme } from "../lib/useTheme";
 
@@ -23,6 +23,7 @@ export function Navbar({ view, setView, usage }) {
         </div>
         <Pills options={VIEWS} value={view} onChange={setView} />
         <div className="topbar-side topbar-icons">
+          <UpdateAlert usage={usage} />
           <UsagePopover usage={usage} />
           <button className="icon-btn" title="Settings" onClick={() => setView("settings")}>
             <GearIcon />
