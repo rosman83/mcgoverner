@@ -103,6 +103,46 @@ function Find-SystemPython {
     return $null
 }
 
+# If there's no Python anywhere on the machine either (assume zero
+# dependencies - plenty of people have genuinely never installed Python),
+# fetch and silently install the real python.org build ourselves rather than
+# giving up. This is a completely different install mechanism from uv's
+# managed Python above (a plain MSI-style installer - no junctions, so it
+# isn't exposed to the "untrusted mount point" problem at all), and needs no
+# admin rights: InstallAllUsers=0 installs just for the current user.
+# ponytail: version is pinned, not queried live - python.org stops
+# publishing new Windows installers for a release once it moves to
+# security-only maintenance (~18 months after release), so the "latest
+# 3.12.x" is actually 3.12.10, several patches behind what uv itself
+# downloads (uv's Python comes from a different, still-actively-published
+# build). Bump this if 3.12.10 ever disappears from python.org/ftp - check
+# https://www.python.org/ftp/python/ for the newest <version>/python-<version>-amd64.exe.
+function Install-PythonSilently {
+    $pyVersion = "3.12.10"
+    $installerUrl = "https://www.python.org/ftp/python/$pyVersion/python-$pyVersion-amd64.exe"
+    $installerPath = Join-Path $env:TEMP "python-$pyVersion-amd64.exe"
+    Write-Output "No Python found on this machine - downloading Python $pyVersion (about 25MB)..."
+    try {
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -TimeoutSec 120
+    } catch {
+        Write-Output "Python download failed: $_"
+        return $null
+    }
+    Write-Output "Installing Python $pyVersion (just for your user account - no admin needed)..."
+    $proc = Start-Process -FilePath $installerPath `
+        -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=0", "Include_launcher=1", "Include_test=0" `
+        -Wait -PassThru
+    Remove-Item $installerPath -ErrorAction SilentlyContinue
+    if ($proc.ExitCode -ne 0) {
+        Write-Output "Python installer exited with code $($proc.ExitCode)."
+        return $null
+    }
+    $shortVersion = ($pyVersion -split '\.')[0..1] -join ''
+    $installedPy = Join-Path $env:LOCALAPPDATA "Programs\Python\Python$shortVersion\python.exe"
+    if (Test-Path $installedPy) { return $installedPy }
+    return $null
+}
+
 # uv can end up with a stale registry entry for a managed Python whose actual
 # binary is gone (antivirus deleting an unrecognized downloaded .exe is common
 # on locked-down school/hospital machines, or a prior run got interrupted
@@ -124,9 +164,10 @@ if (-not (Test-Path ".venv")) {
         Write-Output "uv's managed Python still isn't working here - trying an existing system Python install instead."
         Remove-Item -Recurse -Force ".venv" -ErrorAction SilentlyContinue
         $sysPy = Find-SystemPython
+        if (-not $sysPy) { $sysPy = Install-PythonSilently }
         if ($sysPy) { uv venv .venv --python $sysPy --quiet }
         if (-not $sysPy -or $LASTEXITCODE -ne 0 -or -not (Test-Path ".venv\Scripts\python.exe")) {
-            throw "uv venv failed - no working Python 3.10+ found (uv's managed install and any existing system Python both failed). See the output above for details."
+            throw "uv venv failed - no working Python 3.10+ available (uv's managed install, any existing system Python, and a fresh Python install all failed). See the output above for details."
         }
     }
 }
