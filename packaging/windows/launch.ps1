@@ -136,9 +136,19 @@ $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $psArgs -Redirect
 # need to fix something" when there was nothing to do. The full raw log
 # (including those lines) still gets dumped below on an actual failure -
 # this only changes what shows during a normal run.
+#
+# 120s used to be plenty for the nominal path (one uv venv + pip install),
+# but run.ps1's junction-failure fallback chain (retry, try a system Python,
+# and as a last resort download+silently install a real Python.org build) can
+# now legitimately run past that on a slow connection or a machine that hits
+# every fallback - a real user saw the log show a fully successful "Uvicorn
+# running on http://127.0.0.1:8000" mere moments after this loop gave up and
+# killed that exact process. 600s covers the realistic worst case; a machine
+# that's actually stuck (network fully blocked, etc.) still times out, just
+# later.
 $started = $false
 $lastProgress = ""
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 600; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:8000" -UseBasicParsing -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
