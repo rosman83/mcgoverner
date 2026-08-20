@@ -23,6 +23,21 @@ DEFAULT_MODEL = "google/gemini-3.7-flash"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
 
+MAX_OCR_CHARS_FOR_PROMPT = 1200
+
+
+def cap_for_prompt(text, max_chars=MAX_OCR_CHARS_FOR_PROMPT):
+    """Truncate OCR text before it goes into an LLM prompt. OCR has no natural
+    length limit - one dense scanned/screenshotted slide can produce
+    thousands of characters, often noisy - and this was going into summary
+    and question-generation prompts completely uncapped, sometimes multiplying
+    a single lecture's cost several times over. Only for prompt-building; full
+    OCR text is still stored and shown as-is anywhere it's displayed to the user."""
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n[...OCR text truncated, slide had unusually dense image text...]"
+
 
 def _use_deepseek_for_text():
     enabled = (os.environ.get("USE_DEEPSEEK_FOR_TEXT") or "").strip().lower() in ("1", "true", "yes")

@@ -18,7 +18,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.db import get_conn
-from app.llm.client import chat_json
+from app.llm.client import cap_for_prompt, chat_json
 
 MAX_QUESTIONS = 59
 MIN_SLIDE_WORDS = 15  # skip title/footer-only slides
@@ -267,7 +267,7 @@ def select_slides(lecture_ids=None, target=MAX_QUESTIONS, exclude_slide_ids=None
                     "slide_num": r["slide_num"],
                     "text": r["text"] or "",
                     "caption": r["caption"] or "",
-                    "ocr": r["ocr_text"] or "",
+                    "ocr": cap_for_prompt(r["ocr_text"] or ""),
                 }
             )
     conn.close()

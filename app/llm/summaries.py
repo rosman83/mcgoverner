@@ -1,7 +1,7 @@
 import json
 
 from app.db import get_conn
-from app.llm.client import chat_json
+from app.llm.client import cap_for_prompt, chat_json
 
 SUMMARY_SYSTEM = (
     "You are a senior medical school lecturer writing a condensed study summary "
@@ -40,7 +40,7 @@ def build_lecture_text(lecture_id):
     parts = []
     for r in rows:
         slide_text = r["text"] or ""
-        ocr = r["ocr_text"] or ""
+        ocr = cap_for_prompt(r["ocr_text"] or "")
         caption = r["caption"] or ""
         combined = slide_text
         if caption.strip():

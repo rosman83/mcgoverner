@@ -1,6 +1,7 @@
 import os
 import re
 import pymupdf as fitz
+from PIL import Image, UnidentifiedImageError
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -8,6 +9,27 @@ from app.db import get_conn, DB_PATH
 
 IMAGES_ROOT = os.path.join(os.path.dirname(DB_PATH), "images")
 PDF_DPI = 140
+
+# Unlike the PDF path (rendered at a controlled 140 DPI above), a PPTX's
+# embedded images are the presenter's raw blob - sometimes a multi-thousand-
+# pixel screenshot or phone photo pasted at full size. Vision APIs price
+# image input by resolution, so an oversized embedded image can cost several
+# times what a properly-sized one does for identical content - this was
+# silently multiplying the vision-captioning cost (see ocr.py's fallback)
+# for image-heavy decks. 1568px is well past what OCR/vision needs for a
+# legible slide figure.
+MAX_IMAGE_DIM = 1568
+
+
+def _downscale_if_large(path):
+    try:
+        with Image.open(path) as img:
+            if max(img.size) <= MAX_IMAGE_DIM:
+                return
+            img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
+            img.save(path)
+    except (UnidentifiedImageError, OSError):
+        pass  # not a real/openable image - leave it; OCR/vision will just skip it
 
 
 def _lecture_dir(lecture_id):
@@ -115,6 +137,7 @@ def extract_pptx_images(lecture_id, path, conn=None):
                 dest = os.path.join(_lecture_dir(lecture_id), f"slide_{num}_{seq}.{ext}")
                 with open(dest, "wb") as f:
                     f.write(blob)
+                _downscale_if_large(dest)
                 _insert(conn, slide_by_num[num], dest, "embedded", seq)
                 seq += 1
                 count += 1

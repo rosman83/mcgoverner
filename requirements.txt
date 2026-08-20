@@ -2,6 +2,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.3
 pymupdf==1.28.2
 python-pptx==1.0.2
+pillow==12.3.0
 openai==3.0.0
 python-multipart==0.0.32
 python-dotenv==1.2.2

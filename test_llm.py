@@ -17,6 +17,7 @@ db.init_db()
 
 from app.llm import client as C
 from app.llm import captions as CAP
+from app.ingest import images as IMG
 
 _REAL_GET_CLIENT = C.get_client  # stubs below replace it; some tests need the real one
 
@@ -63,6 +64,38 @@ def test_parse_json():
         assert False, "should have raised"
     except ValueError:
         pass
+
+
+def test_cap_for_prompt():
+    short = "just a normal amount of ocr text"
+    assert C.cap_for_prompt(short) == short
+    long_text = "x" * 5000
+    capped = C.cap_for_prompt(long_text, max_chars=1200)
+    assert len(capped) < 5000, "long OCR text must be truncated before it reaches a prompt"
+    assert capped.startswith("x" * 1200)
+    assert "truncated" in capped
+    assert C.cap_for_prompt(None) == ""  # missing ocr_text is common - must not raise
+
+
+def test_downscale_if_large():
+    from PIL import Image
+
+    big = os.path.join(tempfile.mkdtemp(), "big.png")
+    Image.new("RGB", (3600, 1800), "white").save(big)
+    IMG._downscale_if_large(big)
+    with Image.open(big) as img:
+        assert max(img.size) <= IMG.MAX_IMAGE_DIM, img.size
+
+    small = os.path.join(tempfile.mkdtemp(), "small.png")
+    Image.new("RGB", (200, 100), "white").save(small)
+    IMG._downscale_if_large(small)
+    with Image.open(small) as img:
+        assert img.size == (200, 100), "small images must be left alone"
+
+    not_an_image = os.path.join(tempfile.mkdtemp(), "not_an_image.png")
+    with open(not_an_image, "wb") as f:
+        f.write(b"not actually image bytes")
+    IMG._downscale_if_large(not_an_image)  # must not raise
 
 
 def test_json_mode_on_first_attempt():
