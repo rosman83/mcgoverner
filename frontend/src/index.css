@@ -466,7 +466,14 @@ input.td-title-edit {
 .rev-opt { color: var(--muted); }
 .rev-opt-correct { color: var(--green); font-weight: 600; }
 .rev-opt-wrong { color: var(--red); font-weight: 600; }
+.review-explain-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.review-explain-row .review-explain { flex: 1; min-width: 0; }
 .review-explain { font-size: 13.5px; margin-bottom: 6px; }
+.source-pill {
+  font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  white-space: nowrap; flex-shrink: 0; background: var(--bg); color: var(--muted);
+  border: 1px solid var(--border);
+}
 
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
@@ -514,12 +521,7 @@ input.td-title-edit {
 .lecture-main { flex: 1; min-width: 0; cursor: pointer; }
 .lecture-row-tagged:hover .td-title { color: var(--accent); }
 .lecture-tags { display: flex; gap: 8px; flex-shrink: 0; }
-.lecture-coverage { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; font-size: 12.5px; }
-.coverage-line { display: flex; align-items: center; gap: 5px; }
-.coverage-line .cov-label {
-  width: 54px; text-align: right; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.03em;
-}
+.lecture-coverage { display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 12.5px; }
 
 /* Fixed box for both the pill button and its select/input edit state, so
    swapping between them never resizes the pill and shoves its neighbor -

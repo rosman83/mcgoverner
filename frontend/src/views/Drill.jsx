@@ -350,6 +350,7 @@ function SessionReview({ sid, onBack, cite }) {
 
   if (!data) return <div className="muted">Loading…</div>;
   const qs = data.questions;
+  const tutorMode = !!data.session.tutor_mode;
   const isCorrect = (q) => q.selected_index === -1 ? false
     : (q.selected_index != null ? q.selected_index === q.correct_index : q.selected_correct === 1);
   const correctCount = qs.filter(isCorrect).length;
@@ -414,8 +415,15 @@ function SessionReview({ sid, onBack, cite }) {
                     return <div key={oi} className={cls}>{letters[oi]}. {o}{mark}</div>;
                   })}
                 </div>
-                <div className="review-explain">
-                  <strong>Explanation:</strong> {renderExplanation(q.explanation, q.lecture_id, cite)}
+                <div className="review-explain-row">
+                  <div className="review-explain">
+                    <strong>Explanation:</strong> {renderExplanation(q.explanation, q.lecture_id, cite)}
+                  </div>
+                  {tutorMode && q.lecture_title && (
+                    <span className="source-pill">
+                      {q.lecture_title}{q.lecture_week ? ` · Wk ${q.lecture_week}` : ""}
+                    </span>
+                  )}
                 </div>
                 <SourceBlock
                   images={q.source_images}

@@ -712,7 +712,7 @@ def api_session_review(sid: int):
         "SELECT q.id, q.question, q.options, q.correct_index, q.explanation, sq.answered, "
         "a.selected_index, a.correct AS selected_correct, q.slide_id, q.lecture_id, "
         "q.source AS question_source, "
-        "l.title AS lecture_title, s.slide_num, s.text AS slide_text, s.caption AS slide_caption "
+        "l.title AS lecture_title, l.week AS lecture_week, s.slide_num, s.text AS slide_text, s.caption AS slide_caption "
         "FROM session_questions sq JOIN questions q ON q.id=sq.question_id "
         "LEFT JOIN lectures l ON l.id=q.lecture_id "
         "LEFT JOIN answers a ON a.question_id=q.id AND a.session_id=? "
