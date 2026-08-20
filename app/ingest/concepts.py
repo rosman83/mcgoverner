@@ -201,20 +201,24 @@ def chunk_lecture(lecture_id):
 
 
 def coverage_stats():
-    """Slide-based coverage: how many content slides have at least one question."""
+    """Slide-based coverage: how many content slides have an actually-answered
+    question - not just a generated one, which goes up the moment a session is
+    created regardless of whether the user has done anything with it yet."""
     conn = get_conn()
     total = conn.execute(
         "SELECT COUNT(*) c FROM slides "
         "WHERE (length(trim(text)) >= 15 OR length(trim(ocr_text)) >= 15)"
     ).fetchone()["c"]
     covered = conn.execute(
-        "SELECT COUNT(DISTINCT q.slide_id) c FROM questions q WHERE q.slide_id IS NOT NULL"
+        "SELECT COUNT(DISTINCT q.slide_id) c FROM questions q "
+        "JOIN answers a ON a.question_id = q.id "
+        "WHERE q.slide_id IS NOT NULL"
     ).fetchone()["c"]
     conn.close()
     return {
         "total": total,
         "covered": covered,
-        "question_coverage": round(100 * covered / total, 1) if total else 0,
+        "practiced_coverage": round(100 * covered / total, 1) if total else 0,
     }
 
 

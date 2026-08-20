@@ -1,8 +1,11 @@
 """Slide-based progress stats.
 
-The slide is the atomic unit. Every question is anchored to a slide, so
-coverage = which slides have at least one generated question, and accuracy is
-computed from the `answers` table (which records each answer's correctness).
+The slide is the atomic unit. Every question is anchored to a slide.
+coverage_pct = slides with at least one generated question (goes up the
+moment a session is created, before the user does anything with it).
+practiced_pct = slides with an actually-answered question - the real
+progress signal, and what the UI shows as "coverage". accuracy is computed
+from the `answers` table (which records each answer's correctness).
 """
 from app.db import get_conn
 

@@ -156,7 +156,7 @@ export function Dashboard() {
     <div className="dash">
       <div className="card stat-strip">
         <Stat label="Lectures" value={d.lecture_count} />
-        <Stat label="Coverage" value={d.coverage.question_coverage + "%"} />
+        <Stat label="Coverage" value={d.coverage.practiced_coverage + "%"} />
         <Stat label="Accuracy" value={pct(d.overall_accuracy)} cls={accClass(d.overall_accuracy)} />
       </div>
 
@@ -204,12 +204,12 @@ export function Dashboard() {
             {d.lectures.map((l) => (
               <tr key={l.lecture_id}>
                 <td className="td-title">{l.lecture_title}</td>
-                <td className="muted">{l.slides_covered}/{l.slides_total} covered</td>
+                <td className="muted">{l.slides_practiced}/{l.slides_total} covered</td>
                 <td>{l.q_count}</td>
                 <td><span className={`acc-badge ${accClass(l.accuracy)}`}>{pct(l.accuracy)}</span></td>
                 <td>
-                  <span className="mini-bar"><span className="mini-fill" style={{ width: `${l.coverage_pct}%` }} /></span>
-                  <span className="muted"> {l.coverage_pct}%</span>
+                  <span className="mini-bar"><span className="mini-fill" style={{ width: `${l.practiced_pct}%` }} /></span>
+                  <span className="muted"> {l.practiced_pct}%</span>
                 </td>
               </tr>
             ))}
