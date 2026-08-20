@@ -103,7 +103,9 @@ def api_lectures():
         d = dict(l)
         cov = cov_by_id.get(d["id"])
         d["coverage_pct"] = cov["coverage_pct"] if cov else 0
+        d["practiced_pct"] = cov["practiced_pct"] if cov else 0
         d["slides_covered"] = cov["slides_covered"] if cov else 0
+        d["slides_practiced"] = cov["slides_practiced"] if cov else 0
         d["slides_total"] = cov["slides_total"] if cov else 0
         out.append(d)
     return out
@@ -636,13 +638,33 @@ def api_missed():
 
 @app.get("/api/sessions")
 def api_list_sessions():
-    """All past sessions (newest first), for the Drill 'past sessions' panel."""
+    """All past sessions (newest first), for the Drill 'past sessions' panel.
+
+    sessions.lecture_id only ever records the FIRST lecture a session drew
+    from (or nothing, for an all-lectures session) - not which lectures are
+    actually in it. Derive the real set from the questions each session
+    actually contains, so the list can show it for clarity.
+    """
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM sessions ORDER BY updated_at DESC, id DESC"
     ).fetchall()
+    lecture_rows = conn.execute(
+        "SELECT DISTINCT sq.session_id, l.title "
+        "FROM session_questions sq "
+        "JOIN questions q ON q.id = sq.question_id "
+        "JOIN lectures l ON l.id = q.lecture_id"
+    ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    titles_by_session = {}
+    for r in lecture_rows:
+        titles_by_session.setdefault(r["session_id"], []).append(r["title"])
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["lecture_titles"] = titles_by_session.get(d["id"], [])
+        out.append(d)
+    return out
 
 
 @app.delete("/api/sessions/{sid}")

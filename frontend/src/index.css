@@ -294,6 +294,7 @@ input.td-title-edit {
 }
 .mini-fill { display: block; height: 100%; background: var(--accent); }
 .mini-fill-bad { background: var(--red); }
+.mini-fill-done { background: var(--green); }
 
 .detail-list { list-style: none; padding: 0; margin: 0; }
 .detail-list li { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
@@ -492,6 +493,7 @@ input.td-title-edit {
 .session-row-main { flex: 1; min-width: 0; }
 .session-row-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
 .session-row-meta { font-size: 12.5px; }
+.session-row-lectures { font-size: 12px; margin-top: 3px; }
 .session-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; flex-shrink: 0; }
 .session-progress-row { display: flex; align-items: center; gap: 10px; }
 .session-row-actions { display: flex; gap: 8px; }
@@ -512,7 +514,12 @@ input.td-title-edit {
 .lecture-main { flex: 1; min-width: 0; cursor: pointer; }
 .lecture-row-tagged:hover .td-title { color: var(--accent); }
 .lecture-tags { display: flex; gap: 8px; flex-shrink: 0; }
-.lecture-coverage { display: flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12.5px; }
+.lecture-coverage { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; font-size: 12.5px; }
+.coverage-line { display: flex; align-items: center; gap: 5px; }
+.coverage-line .cov-label {
+  width: 54px; text-align: right; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
 
 /* Fixed box for both the pill button and its select/input edit state, so
    swapping between them never resizes the pill and shoves its neighbor -

@@ -385,9 +385,17 @@ function LectureRow({ l, onPick, onUpdate }) {
           {l.slide_count} slides · {l.summary_status === "done" ? "summary ready" : l.summary_status}
         </div>
       </div>
-      <div className="lecture-coverage">
-        <span className="mini-bar"><span className="mini-fill" style={{ width: `${l.coverage_pct || 0}%` }} /></span>
-        <span className="muted"> {l.coverage_pct || 0}%</span>
+      <div className="lecture-coverage" title="Ready: has a generated question. Practiced: actually answered at least once.">
+        <div className="coverage-line">
+          <span className="muted cov-label">ready</span>
+          <span className="mini-bar"><span className="mini-fill" style={{ width: `${l.coverage_pct || 0}%` }} /></span>
+          <span className="muted">{l.coverage_pct || 0}%</span>
+        </div>
+        <div className="coverage-line">
+          <span className="muted cov-label">practiced</span>
+          <span className="mini-bar"><span className="mini-fill mini-fill-done" style={{ width: `${l.practiced_pct || 0}%` }} /></span>
+          <span className="muted">{l.practiced_pct || 0}%</span>
+        </div>
       </div>
     </li>
   );
@@ -406,9 +414,11 @@ function LectureList({ lectures, onPick, onUpdate }) {
     return weeks.map((w) => {
       const items = byWeek.get(w);
       const covered = items.reduce((s, l) => s + (l.slides_covered || 0), 0);
+      const practiced = items.reduce((s, l) => s + (l.slides_practiced || 0), 0);
       const total = items.reduce((s, l) => s + (l.slides_total || 0), 0);
       const coveragePct = total ? Math.round((1000 * covered) / total) / 10 : 0;
-      return { week: w, items, coveragePct };
+      const practicedPct = total ? Math.round((1000 * practiced) / total) / 10 : 0;
+      return { week: w, items, coveragePct, practicedPct };
     });
   }, [lectures]);
 
@@ -419,10 +429,12 @@ function LectureList({ lectures, onPick, onUpdate }) {
     <div>
       {groups.map((g) => (
         <div key={g.week ?? "none"} className="lecture-group">
-          <div className="lecture-group-head-row">
+          <div className="lecture-group-head-row" title="Ready: has a generated question. Practiced: actually answered at least once.">
             <div className="lecture-group-head muted">{g.week ? `Week ${g.week}` : "No week set"}</div>
             <span className="mini-bar"><span className="mini-fill" style={{ width: `${g.coveragePct}%` }} /></span>
-            <span className="muted" style={{ fontSize: 12 }}>{g.coveragePct}%</span>
+            <span className="muted" style={{ fontSize: 12 }}>{g.coveragePct}% ready</span>
+            <span className="mini-bar"><span className="mini-fill mini-fill-done" style={{ width: `${g.practicedPct}%` }} /></span>
+            <span className="muted" style={{ fontSize: 12 }}>{g.practicedPct}% practiced</span>
           </div>
           <ul className="detail-list">
             {g.items.map((l) => <LectureRow key={l.id} l={l} onPick={onPick} onUpdate={onUpdate} />)}

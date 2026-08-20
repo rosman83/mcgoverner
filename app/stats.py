@@ -16,6 +16,7 @@ def lecture_stats():
         "SELECT l.id AS lecture_id, l.title AS lecture_title, "
         "COUNT(DISTINCT s.id) AS slides_total, "
         "COUNT(DISTINCT CASE WHEN q.id IS NOT NULL THEN s.id END) AS slides_covered, "
+        "COUNT(DISTINCT CASE WHEN a.id IS NOT NULL THEN s.id END) AS slides_practiced, "
         "COUNT(DISTINCT q.id) AS q_count, "
         "COUNT(DISTINCT CASE WHEN a.id IS NOT NULL THEN q.id END) AS q_answered, "
         "SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END) AS correct, "
@@ -34,12 +35,22 @@ def lecture_stats():
     for r in rows:
         d = dict(r)
         d["slides_covered"] = d["slides_covered"] or 0
+        d["slides_practiced"] = d["slides_practiced"] or 0
         d["q_count"] = d["q_count"] or 0
         d["q_answered"] = d["q_answered"] or 0
         d["correct"] = d["correct"] or 0
         d["answers"] = d["answers"] or 0
         d["coverage_pct"] = (
             round(100 * d["slides_covered"] / d["slides_total"], 1)
+            if d["slides_total"]
+            else 0
+        )
+        # coverage_pct only means "a question exists" - it goes up the moment a
+        # session is created, before the user has answered anything in it.
+        # practiced_pct is the real progress signal: slides where a question
+        # has actually been answered at least once.
+        d["practiced_pct"] = (
+            round(100 * d["slides_practiced"] / d["slides_total"], 1)
             if d["slides_total"]
             else 0
         )

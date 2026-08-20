@@ -10,6 +10,9 @@ export function SessionRow({ s, onResume, onReview, onDelete }) {
         <div className="session-row-meta muted">
           {s.mode === "review" ? "Review" : "Practice"} · {s.tutor_mode ? "tutor" : "quiz"} · {fmtDate(s.created_at)}
         </div>
+        {s.lecture_titles?.length > 0 && (
+          <div className="session-row-lectures muted">{s.lecture_titles.join(", ")}</div>
+        )}
       </div>
       <div className="session-row-side">
         {s.status !== "completed" && s.target_count > 0 && (
