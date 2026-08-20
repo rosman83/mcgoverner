@@ -181,9 +181,20 @@ if (-not $started) {
 # false forever, the retry loop timed out, and the script killed a perfectly
 # working server while telling the user "McGoverner didn't start". Now a
 # failure here just falls through to the manual-link instructions.
+#
+# `Start-Process "http://..."` (a bare URL) goes through .NET's Process
+# abstraction, which several users reported as a no-op: no exception thrown
+# (so $opened came back true), but no browser window ever actually appeared -
+# a known flaky pattern on Windows when the default browser is a packaged/
+# Store app or under stricter default-app policy. `cmd /c start` is the OS's
+# own, much more battle-tested mechanism for "open this URL in the default
+# browser" - it's what most Windows dev tools shell out to for exactly this
+# reason. The empty "" is required: `start`'s first quoted argument is a
+# window title, and without it `start` treats the URL itself as the title
+# and opens nothing.
 $opened = $false
 try {
-    Start-Process "http://localhost:8000"
+    Start-Process -FilePath "cmd.exe" -ArgumentList '/c start "" "http://localhost:8000"' -WindowStyle Hidden
     $opened = $true
 } catch {}
 
