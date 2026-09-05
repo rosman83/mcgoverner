@@ -327,7 +327,8 @@ def test_question_set_parsing_rejects_junk():
     ]}
     parsed = QS._parse_chunk("some text", "")
     assert len(parsed) == 1, parsed
-    assert parsed[0]["correct_index"] == 2 and len(parsed[0]["options"]) == 4
+    assert len(parsed[0]["options"]) == 4
+    assert parsed[0]["options"][parsed[0]["correct_index"]] == "c"
 
 
 def test_question_set_import_is_idempotent():

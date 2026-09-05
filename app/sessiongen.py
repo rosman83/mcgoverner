@@ -320,6 +320,12 @@ def _question_from_result(s, result):
     stem = (result.get("question") or "").strip()
     if not _valid_stem(stem) or any(_FORBIDDEN_STEM.search(o) for o in options):
         return None
+    # LLM authors skew toward writing the correct option first; shuffle so the
+    # displayed answer letter isn't predictable.
+    order = list(range(len(options)))
+    random.shuffle(order)
+    options = [options[i] for i in order]
+    correct = order.index(correct)
     return {
         "lecture_id": s["lecture_id"],
         "slide_id": s["slide_id"],

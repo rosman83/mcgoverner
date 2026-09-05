@@ -9,6 +9,7 @@ keeps them out of coverage math), then reused free forever.
 """
 import json
 import os
+import random
 
 from app.db import get_conn
 from app.ingest.slides import extract_pdf, extract_pptx
@@ -96,6 +97,10 @@ def _parse_chunk(text, answer_key):
             continue
         if not stem or len(options) < 2 or not (0 <= correct < len(options)):
             continue
+        order = list(range(len(options)))
+        random.shuffle(order)
+        options = [options[i] for i in order]
+        correct = order.index(correct)
         out.append({
             "question": stem,
             "options": options,
