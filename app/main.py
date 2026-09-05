@@ -1,7 +1,9 @@
 import logging
 import os
 import json
+import signal
 import subprocess
+import threading
 import traceback
 import uuid
 from datetime import datetime, timedelta
@@ -134,6 +136,30 @@ def index():
     with open(os.path.join(DIST_DIR, "index.html"), encoding="utf-8") as f:
         html = f.read()
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+# ---------- Lifecycle ----------
+@app.post("/api/quit")
+def api_quit():
+    """The Mac launcher runs as a script wrapped in an AppleScript app with no
+    Dock/menu-bar quit affordance most users will find, so it's easy to end up
+    with the server stuck running in the background with no visible way to
+    stop it. Give the UI itself a kill switch: free port 8000 outright rather
+    than trying to gracefully stop just this process, since --reload runs a
+    supervisor process that can otherwise just restart what we kill.
+    ponytail: lsof/kill is POSIX-only. Windows's launcher runs in a visible
+    console window that already stops the process tree on close, so it hasn't
+    hit this complaint - add a taskkill path here if that changes.
+    """
+    def _die():
+        try:
+            out = subprocess.run(["lsof", "-ti", "tcp:8000"], capture_output=True, text=True).stdout
+            for pid in out.split():
+                os.kill(int(pid), signal.SIGKILL)
+        except Exception:
+            pass
+    threading.Timer(0.3, _die).start()
+    return {"ok": True}
 
 
 # ---------- Lectures ----------

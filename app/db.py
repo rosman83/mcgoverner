@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import random
 from datetime import datetime
 
 # BLOCK1_DB points the app at a different database — used to run the UI tests against a
@@ -195,7 +196,38 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     _migrate(conn)
+    _shuffle_unanswered_options(conn)
     conn.close()
+
+
+# Pre-shuffle-fix versions skewed toward putting the correct option first, so users on
+# an old build saw the answer land on A/B far more than chance. The generation-time fix
+# (sessiongen._question_from_result) only affects newly generated questions - this is
+# the one-time backfill for whatever's already sitting in someone's local db. Runs
+# automatically on every startup (cheap no-op once the flag is set) so it reaches users
+# without them having to do anything beyond the normal relaunch-to-update.
+def _shuffle_unanswered_options(conn):
+    FLAG = "shuffled_unanswered_options_v1"
+    if conn.execute("SELECT 1 FROM settings WHERE key=?", (FLAG,)).fetchone():
+        return
+    # Already-answered questions are left untouched - reshuffling would desync the
+    # stored option order from what the user actually saw and answered.
+    rows = conn.execute(
+        """SELECT id, options, correct_index FROM questions q
+           WHERE NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id)"""
+    ).fetchall()
+    for r in rows:
+        options = json.loads(r["options"])
+        order = list(range(len(options)))
+        random.shuffle(order)
+        conn.execute(
+            "UPDATE questions SET options=?, correct_index=? WHERE id=?",
+            (json.dumps([options[i] for i in order]), order.index(r["correct_index"]), r["id"]),
+        )
+    conn.execute("INSERT INTO settings (key, value) VALUES (?, '1')", (FLAG,))
+    conn.commit()
+    if rows:
+        print(f"db: reshuffled options on {len(rows)} unanswered question(s)")
 
 
 # Columns that must exist on each table, whatever route the database took to get here.

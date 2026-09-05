@@ -1,7 +1,8 @@
 import { Pills } from "./Pills";
 import { UsagePopover, UpdateAlert } from "./UsagePopover";
-import { GearIcon, SunIcon, MoonIcon, HatIcon } from "./icons";
+import { GearIcon, SunIcon, MoonIcon, HatIcon, PowerIcon } from "./icons";
 import { useTheme } from "../lib/useTheme";
+import { quitApp } from "../lib/api";
 
 const VIEWS = [
   { value: "dashboard", label: "Dashboard" },
@@ -30,6 +31,17 @@ export function Navbar({ view, setView, usage }) {
           </button>
           <button className="icon-btn" title="Toggle theme" onClick={toggle}>
             {isDark ? <SunIcon /> : <MoonIcon />}
+          </button>
+          <button
+            className="icon-btn"
+            title="Quit McGoverner"
+            onClick={() => {
+              quitApp();
+              document.body.innerHTML =
+                "<p style='padding:2rem;font:16px system-ui'>McGoverner has quit. You can close this tab.</p>";
+            }}
+          >
+            <PowerIcon />
           </button>
         </div>
       </div>

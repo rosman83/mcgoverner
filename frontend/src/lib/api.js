@@ -67,3 +67,9 @@ export function uploadWithProgress(path, formData, onProgress) {
     xhr.send(formData);
   });
 }
+
+// Fire-and-forget: /api/quit kills the server process shortly after responding, so
+// the connection dropping is expected, not an error worth throwing on.
+export function quitApp() {
+  fetch("/api/quit", { method: "POST" }).catch(() => {});
+}
