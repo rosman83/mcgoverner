@@ -180,7 +180,34 @@ def _state_seed(slides):
     return hash(key) & 0xFFFFFFFF
 
 
+_CACHE = {}
+
+
+def _cache_key():
+    # Everything the simulation reads changes one of these: answers (count + newest id
+    # catches edits that re-insert), slides, or generated questions.
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM answers), (SELECT COALESCE(MAX(id),0) FROM answers), "
+        "(SELECT COUNT(*) FROM slides), (SELECT COUNT(*) FROM questions), "
+        "(SELECT COALESCE(SUM(correct),0) FROM answers)"
+    ).fetchone()
+    conn.close()
+    return tuple(row)
+
+
 def mastery_projection(trials=TRIALS, seed=None):
+    """Cached on the DB state: the Dashboard calls this on every load and the
+    simulation takes seconds. An explicit seed/trials bypasses the cache."""
+    if seed is not None or trials != TRIALS:
+        return _mastery_projection(trials, seed)
+    key = _cache_key()
+    if _CACHE.get("key") != key:
+        _CACHE["key"], _CACHE["val"] = key, _mastery_projection(trials, seed)
+    return _CACHE["val"]
+
+
+def _mastery_projection(trials=TRIALS, seed=None):
     """Estimate the questions still needed to master every slide.
 
     Returns the median and interquartile range across simulations, so the UI can show a

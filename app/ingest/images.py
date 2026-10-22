@@ -196,13 +196,24 @@ def images_for_lecture(lecture_id):
 
 def images_for_slides(slide_ids):
     """Image URLs for a list of slide ids (for question source material)."""
+    return [u for urls in images_by_slide(slide_ids).values() for u in urls]
+
+
+def images_by_slide(slide_ids):
+    """{slide_id: [image URLs]} in one query - callers listing many slides used to
+    open a connection per row."""
+    slide_ids = [i for i in slide_ids if i is not None]
     if not slide_ids:
-        return []
+        return {}
     conn = get_conn()
     ph = ",".join("?" * len(slide_ids))
     rows = conn.execute(
-        f"SELECT path FROM slide_images WHERE slide_id IN ({ph}) ORDER BY seq",
+        f"SELECT slide_id, path FROM slide_images WHERE slide_id IN ({ph}) "
+        "ORDER BY slide_id, seq",
         tuple(slide_ids),
     ).fetchall()
     conn.close()
-    return ["/images/" + r["path"] for r in rows]
+    out = {}
+    for r in rows:
+        out.setdefault(r["slide_id"], []).append("/images/" + r["path"])
+    return out

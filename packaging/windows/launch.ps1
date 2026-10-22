@@ -54,6 +54,23 @@ function Show-Error([string]$Message) {
 # with every Windows 10/11 install, so this never depends on anything the user
 # would need to set up first.
 function Fetch-Code {
+    # Skip the download when nothing changed. The Accept header makes the
+    # commits API return just the bare SHA. Offline/rate-limited: $latest stays
+    # empty and we fall through to the download and its failure handling.
+    $latest = ""
+    try {
+        $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 `
+            -Uri "https://api.github.com/repos/rosman83/mcgoverner/commits/$RepoBranch" `
+            -Headers @{ "User-Agent" = "McGoverner-Launcher"; "Accept" = "application/vnd.github.sha" }
+        $text = if ($r.Content -is [byte[]]) { [Text.Encoding]::ASCII.GetString($r.Content) } else { [string]$r.Content }
+        if ($text.Trim() -match '^[0-9a-f]{40}$') { $latest = $text.Trim().Substring(0, 7) }
+    } catch { }
+    $versionFile = Join-Path $InstallDir ".version"
+    $current = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "" }
+    if ($latest -and $latest -eq $current -and (Test-Path (Join-Path $InstallDir "run.ps1"))) {
+        "Already up to date ($current) - skipping download." | Out-File -Append $RunLog
+        return $true
+    }
     $tmp = Join-Path $env:TEMP ("mcgoverner-dl-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $zipPath = Join-Path $tmp "repo.zip"
@@ -95,29 +112,29 @@ function Fetch-Code {
     }
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 
-    # Stamp the actual commit hash just downloaded into a .version file, so
-    # main.py can show something more useful than "dev" (git rev-parse always
-    # fails here - this zip download has no .git). Best-effort: written after
-    # robocopy's mirror pass so it's never itself mirrored away, and a failure
-    # here (offline, GitHub rate limit) just leaves the app showing "dev" -
-    # nothing else depends on this succeeding.
-    try {
-        $sha = (Invoke-RestMethod -Uri "https://api.github.com/repos/rosman83/mcgoverner/commits/$RepoBranch" `
-            -Headers @{ "User-Agent" = "McGoverner-Launcher" } -TimeoutSec 10).sha.Substring(0, 7)
-        Set-Content -Path (Join-Path $InstallDir ".version") -Value $sha -NoNewline
-    } catch { }
+    # Stamp the commit just synced (written after robocopy's mirror pass so
+    # it's never mirrored away). If the SHA check above failed, remove any old
+    # stamp rather than leave one that claims a version we no longer match.
+    if ($latest) { Set-Content -Path $versionFile -Value $latest -NoNewline }
+    else { Remove-Item $versionFile -ErrorAction SilentlyContinue }
 
     return $true
 }
 
 Write-Host "Downloading the latest version..."
 if (-not (Fetch-Code)) {
-    Write-Host "FAILED to download. Details:"
-    Get-Content $RunLog -ErrorAction SilentlyContinue | Write-Host
-    Show-Error "Could not download McGoverner. Check your internet connection - a corporate VPN or firewall blocking/intercepting github.com will also cause this."
-    exit 1
+    if (Test-Path (Join-Path $InstallDir "run.ps1")) {
+        # Offline (or GitHub blocked) but already installed: run what we have.
+        Write-Host "Couldn't check for updates - launching the version already installed."
+    } else {
+        Write-Host "FAILED to download. Details:"
+        Get-Content $RunLog -ErrorAction SilentlyContinue | Write-Host
+        Show-Error "Could not download McGoverner. Check your internet connection - a corporate VPN or firewall blocking/intercepting github.com will also cause this."
+        exit 1
+    }
+} else {
+    Write-Host "Up to date."
 }
-Write-Host "Downloaded."
 
 Set-Location $InstallDir
 

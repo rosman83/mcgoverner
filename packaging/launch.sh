@@ -54,7 +54,20 @@ with_timeout() {
 # (this is what was actually hanging - see the fetch_code comment below).
 # curl/unzip/rsync ship with every Mac; git does not.
 fetch_code() {
-  local tmp src
+  local tmp src latest current
+  # Skip the whole download when nothing changed. The Accept header makes the
+  # commits API return just the bare 40-char SHA (no JSON to parse - grepping
+  # one-line JSON is what broke .version before). Offline/rate-limited: empty
+  # result, so we fall through to the download and its failure handling.
+  latest="$(curl -sL --max-time 10 -H "User-Agent: McGoverner-Launcher" \
+    -H "Accept: application/vnd.github.sha" \
+    "https://api.github.com/repos/rosman83/mcgoverner/commits/${REPO_BRANCH}" 2>/dev/null \
+    | grep -m1 -oE '^[0-9a-f]{40}$' | cut -c1-7)"
+  current="$(cat "$INSTALL_DIR/.version" 2>/dev/null)"
+  if [ -n "$latest" ] && [ "$latest" = "$current" ] && [ -f "$INSTALL_DIR/run.sh" ]; then
+    echo "Already up to date ($current) - skipping download." >> "$RUN_LOG"
+    return 0
+  fi
   tmp="$(mktemp -d)" || return 1
   if ! curl -sL --connect-timeout 15 --max-time 60 -o "$tmp/repo.zip" "$ZIP_URL" >> "$RUN_LOG" 2>&1; then
     rm -rf "$tmp"; return 1
@@ -71,9 +84,11 @@ fetch_code() {
   # are excluded from both the copy AND the delete pass, so a fresh download
   # every launch never touches config or imported lectures - this is simpler
   # than diffing against git history and works identically for every user.
-  rsync -a --delete \
-    --exclude=.env --exclude=data --exclude=lectures --exclude=.venv --exclude=.git \
-    "$src"/ "$INSTALL_DIR"/ >> "$RUN_LOG" 2>&1
+  if ! rsync -a --delete \
+      --exclude=.env --exclude=data --exclude=lectures --exclude=.venv --exclude=.git \
+      "$src"/ "$INSTALL_DIR"/ >> "$RUN_LOG" 2>&1; then
+    rm -rf "$tmp"; return 1   # partial overlay: don't stamp a version for it
+  fi
 
   # Stamp the commit hash just downloaded into .version, so main.py can show
   # it (no .git here for `git rev-parse`) and tell when an update is out.
@@ -122,8 +137,14 @@ if [ "$IS_DEV_CHECKOUT" -eq 1 ]; then
   fi
 else
   if ! fetch_code; then
-    show_error "Could not download McGoverner. Check your internet connection — a corporate VPN or firewall blocking/intercepting github.com will also cause this."
-    exit 1
+    # Offline (or GitHub blocked) but already installed: run what we have -
+    # drilling, review and summaries all work without a network.
+    if [ -f "$INSTALL_DIR/run.sh" ]; then
+      echo "Update check failed - launching the version already installed." >> "$RUN_LOG"
+    else
+      show_error "Could not download McGoverner. Check your internet connection — a corporate VPN or firewall blocking/intercepting github.com will also cause this."
+      exit 1
+    fi
   fi
 fi
 
