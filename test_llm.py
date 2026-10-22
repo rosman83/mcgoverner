@@ -882,9 +882,13 @@ def test_lecture_week_tagging():
     # Explicit null clears it.
     assert c.patch("/api/lectures/1", json={"week": None}).json()["week"] is None
 
-    assert c.patch("/api/lectures/1", json={"week": 0}).status_code == 400
-    assert c.patch("/api/lectures/1", json={"week": 53}).status_code == 400
-    assert c.patch("/api/lectures/1", json={"week": -1}).status_code == 400
+    # Free text: letters and words are valid labels, whitespace is collapsed,
+    # blank clears, and absurd lengths are capped.
+    assert c.patch("/api/lectures/1", json={"week": "A"}).json()["week"] == "A"
+    assert c.patch("/api/lectures/1", json={"week": "  Midterm \n review "}).json()["week"] == "Midterm review"
+    assert c.patch("/api/lectures/1", json={"week": 7}).json()["week"] == 7
+    assert c.patch("/api/lectures/1", json={"week": "   "}).json()["week"] is None
+    assert len(c.patch("/api/lectures/1", json={"week": "x" * 500}).json()["week"]) == 40
 
 
 def test_delete_session_keeps_answers_and_missed():

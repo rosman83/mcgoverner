@@ -68,9 +68,11 @@ import), **doctoring** (green), **anatomy** (amber). Changing it saves right awa
 Add strands in `LECTURE_TAGS` (`main.py`, and the matching list in `frontend/src/views/Learn.jsx` + colors in
 `frontend/src/index.css`).
 
-Next to it is a **Week** pill — type the week the lecture was given (1–52) and it saves
-on Enter or blur; clear the box to untag. Weeks are stored on the lecture, so they are
-available for grouping or filtering later.
+Next to it is a **Week** pill — type any label for the lecture (a number, a letter, or a
+name like "Midterm review") and it saves on Enter or blur; clear the box to untag. Bare
+numbers show as "Week 3", anything else shows as typed, and lectures are grouped and
+sorted by label. Labels are stored on the lecture, so they are available for grouping or
+filtering later.
 
 ## Professor practice questions
 

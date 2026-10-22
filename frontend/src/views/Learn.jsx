@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { weekText, weekLabel, weekCompare } from "../lib/format";
 import { SessionRow } from "../components/SessionRow";
 import { notifyLecturesChanged, onLecturesChanged, notifySessionsChanged, onSessionsChanged } from "../lib/events";
 
@@ -296,21 +297,21 @@ function EditableTagPill({ value, onSave }) {
 
 function EditableWeekPill({ week, onSave }) {
   const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(week || "");
+  const [val, setVal] = useState(weekText(week));
 
   async function commit() {
     setEditing(false);
-    const n = val === "" ? null : parseInt(val, 10);
-    if (n !== (week || null)) await onSave(n);
+    const t = val.trim();
+    if (t !== weekText(week)) await onSave(t || null);
   }
 
   if (editing) {
     return (
       <input
         autoFocus
-        type="number"
-        min={1}
-        max={52}
+        type="text"
+        maxLength={40}
+        placeholder="e.g. 3, A, Midterm"
         className="tag-pill tag-week tag-edit"
         value={val}
         onClick={(e) => e.stopPropagation()}
@@ -324,9 +325,9 @@ function EditableWeekPill({ week, onSave }) {
     <button
       type="button"
       className="tag-pill tag-week"
-      onClick={(e) => { e.stopPropagation(); setVal(week || ""); setEditing(true); }}
+      onClick={(e) => { e.stopPropagation(); setVal(weekText(week)); setEditing(true); }}
     >
-      {week ? `Week ${week}` : "Set week"}
+      {weekText(week) ? weekLabel(week) : "Set week"}
     </button>
   );
 }
@@ -402,11 +403,11 @@ function LectureList({ lectures, onPick, onUpdate }) {
   const groups = useMemo(() => {
     const byWeek = new Map();
     for (const l of lectures) {
-      const key = l.week || null;
+      const key = weekText(l.week) || null;
       if (!byWeek.has(key)) byWeek.set(key, []);
       byWeek.get(key).push(l);
     }
-    const weeks = [...byWeek.keys()].filter((k) => k !== null).sort((a, b) => a - b);
+    const weeks = [...byWeek.keys()].filter((k) => k !== null).sort(weekCompare);
     if (byWeek.has(null)) weeks.push(null);
     return weeks.map((w) => {
       const items = byWeek.get(w);
@@ -425,7 +426,7 @@ function LectureList({ lectures, onPick, onUpdate }) {
       {groups.map((g) => (
         <div key={g.week ?? "none"} className="lecture-group">
           <div className="lecture-group-head-row">
-            <div className="lecture-group-head muted">{g.week ? `Week ${g.week}` : "No week set"}</div>
+            <div className="lecture-group-head muted">{g.week ? weekLabel(g.week) : "No week set"}</div>
             <span className="mini-bar"><span className="mini-fill mini-fill-done" style={{ width: `${g.practicedPct}%` }} /></span>
             <span className="muted" style={{ fontSize: 12 }}>{g.practicedPct}%</span>
           </div>

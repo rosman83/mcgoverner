@@ -299,7 +299,7 @@ def api_import_question_set(
 LECTURE_TAGS = ("foundations", "doctoring", "anatomy")
 
 
-MAX_WEEK = 52
+MAX_WEEK_LEN = 40
 
 
 class LectureUpdate(BaseModel):
@@ -307,7 +307,8 @@ class LectureUpdate(BaseModel):
     # stays strict, so sending null 422s. `| None` is what makes "clear the week" work.
     title: str | None = None
     tag: str | None = None
-    week: int | None = None
+    # Free-text label ("3", "A", "Midterm review"); ints still accepted.
+    week: str | int | None = None
 
 
 @app.patch("/api/lectures/{lid}")
@@ -328,10 +329,9 @@ def api_update_lecture(lid: int, body: LectureUpdate):
         params.append(body.tag)
     # model_fields_set distinguishes "week omitted" from "week: null" (clear it).
     if "week" in body.model_fields_set:
-        if body.week is not None and not (1 <= body.week <= MAX_WEEK):
-            raise HTTPException(400, f"Week must be between 1 and {MAX_WEEK}")
+        week = " ".join(str(body.week).split())[:MAX_WEEK_LEN] if body.week is not None else ""
         fields.append("week=?")
-        params.append(body.week)
+        params.append(week or None)   # blank clears it
     if not fields:
         raise HTTPException(400, "Nothing to update")
 

@@ -10,3 +10,18 @@ export function fmtDate(s) {
     d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   );
 }
+
+// A lecture's "week" is a free-text label ("3", "A", "Midterm review"). The
+// DB column has INTEGER affinity, so plain numbers come back as numbers and
+// everything else as text - always go through these instead of using it raw.
+export function weekText(w) {
+  return w === null || w === undefined ? "" : String(w).trim();
+}
+// Bare numbers read as "Week 3"; anything else is shown exactly as typed.
+export function weekLabel(w) {
+  const t = weekText(w);
+  return /^\d+$/.test(t) ? `Week ${t}` : t;
+}
+export function weekCompare(a, b) {
+  return weekText(a).localeCompare(weekText(b), undefined, { numeric: true, sensitivity: "base" });
+}

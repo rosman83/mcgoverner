@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { weekText, weekLabel, weekCompare } from "../lib/format";
 import { Pills } from "../components/Pills";
 import { onLecturesChanged, notifySessionsChanged } from "../lib/events";
 
@@ -138,7 +139,7 @@ function Setup({ onStarted }) {
   }, []);
 
   const weeks = useMemo(
-    () => [...new Set(lectures.map((l) => l.week).filter(Boolean))].sort((a, b) => a - b),
+    () => [...new Set(lectures.map((l) => weekText(l.week)).filter(Boolean))].sort(weekCompare),
     [lectures]
   );
 
@@ -157,7 +158,7 @@ function Setup({ onStarted }) {
   function applyFilters(week, tag) {
     if (!week && !tag) return;
     const matches = lectures.filter(
-      (l) => (!week || String(l.week) === String(week)) && (!tag || l.tag === tag)
+      (l) => (!week || weekText(l.week) === String(week)) && (!tag || l.tag === tag)
     );
     setChecked(new Set(matches.map((l) => l.id)));
     setAllLectures(false);
@@ -209,7 +210,7 @@ function Setup({ onStarted }) {
             <div className="lp-filters">
               <select value={weekFilter} onChange={(e) => onWeekFilter(e.target.value)} style={{ maxWidth: 140 }}>
                 <option value="">Filter by week…</option>
-                {weeks.map((w) => <option key={w} value={w}>Week {w}</option>)}
+                {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
               </select>
               <Pills options={TAG_OPTIONS} value={tagFilter} onChange={onTagFilter} />
             </div>
@@ -336,7 +337,7 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
             {question.source_slide?.lecture_title && (
               <span className="source-pill">
                 {question.source_slide.lecture_title}
-                {question.source_slide.lecture_week ? ` · Wk ${question.source_slide.lecture_week}` : ""}
+                {weekText(question.source_slide.lecture_week) ? ` · ${weekLabel(question.source_slide.lecture_week)}` : ""}
               </span>
             )}
           </div>
@@ -464,7 +465,7 @@ function SessionReview({ sid, onBack, cite }) {
                   </div>
                   {tutorMode && q.lecture_title && (
                     <span className="source-pill">
-                      {q.lecture_title}{q.lecture_week ? ` · Wk ${q.lecture_week}` : ""}
+                      {q.lecture_title}{weekText(q.lecture_week) ? ` · ${weekLabel(q.lecture_week)}` : ""}
                     </span>
                   )}
                 </div>
