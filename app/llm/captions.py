@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.db import get_conn
-from app.llm.client import chat_json
+from app.llm.client import cap_for_prompt, chat_json
 
 CAPTION_SYSTEM = (
     "You are a medical educator writing concise image captions for lecture slides. "
@@ -58,7 +58,7 @@ def _build_batch_prompt(title, batch):
         blocks.append(
             f"SLIDE {i} | Slide number: {s['slide_num']}\n"
             f"SLIDE TEXT: {(s['text'] or '').strip() or '(no extractable text)'}\n"
-            f"IMAGE TEXT (OCR): {(s['ocr_text'] or '').strip()}"
+            f"IMAGE TEXT (OCR): {cap_for_prompt((s['ocr_text'] or '').strip())}"
         )
     return CAPTION_BATCH_PROMPT.format(
         count=len(batch),

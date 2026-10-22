@@ -185,6 +185,12 @@ if (-not $env:DEEPSEEK_API_KEY -and -not $env:OPENROUTER_API_KEY) {
 }
 
 Write-Output "PROGRESS: Starting the app..."
+# launch.ps1 redirects this process's output to a log file, and Python 3.12 on
+# Windows then writes stdout as cp1252 in strict mode: one print() of an arrow,
+# Greek letter, or non-Latin filename inside an except block raised
+# UnicodeEncodeError and killed the background job part-way (already-billed
+# work the user then re-triggers). UTF-8 mode makes stdout UTF-8.
+$env:PYTHONUTF8 = "1"
 # No --reload: that's a dev-only flag that restarts the whole server on any
 # .py file change it notices under the watched directory - mid-request, with
 # no warning, which reads to a user as a random vague 500. Nobody is

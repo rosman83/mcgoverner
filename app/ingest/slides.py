@@ -72,14 +72,15 @@ def import_lecture(path):
     conn.commit()
     conn.close()
 
-    # Extract images after slides exist (best-effort; never blocks import)
+    # Extract images after slides exist (best-effort; never blocks import).
+    # OCR is NOT run here: the caller's background _analyze_lecture runs it.
+    # Running it here too did every OCR + paid vision call twice per import,
+    # and held the upload request open for the whole first pass.
     try:
         from app.ingest.images import extract_lecture_images
         extract_lecture_images(lecture_id)
-        from app.ingest.ocr import run_ocr_for_lecture
-        run_ocr_for_lecture(lecture_id)
     except Exception as e:
-        print(f"image/ocr extraction for lecture {lecture_id} failed: {e}")
+        print(f"image extraction for lecture {lecture_id} failed: {e}")
 
     return lecture_id
 

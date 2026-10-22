@@ -971,6 +971,45 @@ def test_reupload_never_overwrites_a_lecture_file():
     assert first != second and os.path.basename(second) == "L1 (1).pdf", second
 
 
+def test_no_ocr_engine_only_sends_textless_pages_to_vision():
+    """Windows has no Apple Vision OCR. Every PDF page render used to read as
+    "no text" and went to a paid vision call; the page's own text layer is the
+    stand-in now, so only near-empty pages (and PPTX figures) cost a call."""
+    from app.ingest import ocr as O
+
+    conn = db.get_conn()
+    lid = conn.execute(
+        "INSERT INTO lectures(title, filename, source) VALUES('OCR', 'o.pdf', 'pdf')"
+    ).lastrowid
+    slides = [
+        ("Cardiac output equals stroke volume times heart rate, about 5 L/min at rest.", "page"),
+        ("Figure 3", "page"),                                   # near-empty page: a figure
+        ("Histology of the myocardium: intercalated discs and branching fibers.", "embedded"),
+    ]
+    os.makedirs(os.path.join(O.IMAGES_ROOT, "ocr_test"), exist_ok=True)
+    for num, (text, kind) in enumerate(slides, 1):
+        sid = conn.execute(
+            "INSERT INTO slides(lecture_id, slide_num, text) VALUES(?,?,?)", (lid, num, text)
+        ).lastrowid
+        rel = os.path.join("ocr_test", f"{num}.jpg")
+        open(os.path.join(O.IMAGES_ROOT, rel), "wb").close()
+        conn.execute(
+            "INSERT INTO slide_images(slide_id, path, kind, seq) VALUES(?,?,?,0)", (sid, rel, kind)
+        )
+    conn.commit()
+    conn.close()
+
+    described = []
+    real_apple, real_describe = O._ocr_image_apple, O.describe_image
+    O._ocr_image_apple = lambda path: None  # what Windows sees: no Vision framework
+    O.describe_image = lambda path, prompt, **kw: described.append(os.path.basename(path)) or "a figure"
+    try:
+        O.run_ocr_for_lecture(lid)
+    finally:
+        O._ocr_image_apple, O.describe_image = real_apple, real_describe
+    assert sorted(described) == ["2.jpg", "3.jpg"], described
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

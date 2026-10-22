@@ -51,9 +51,10 @@ def _ocr_image_apple(path):
 
 
 def _ocr_image(path):
-    """OCR an image; returns recognized text string."""
+    """OCR an image; returns recognized text, or None if this machine has no
+    OCR engine (Apple Vision is macOS-only)."""
     try:
-        return _ocr_image_apple(path) or ""
+        return _ocr_image_apple(path)
     except Exception:
         return ""
 
@@ -78,20 +79,24 @@ def run_ocr_for_lecture(lecture_id):
     conn.commit()
 
     slides = conn.execute(
-        "SELECT id, slide_num FROM slides WHERE lecture_id=? ORDER BY slide_num",
+        "SELECT id, slide_num, text FROM slides WHERE lecture_id=? ORDER BY slide_num",
         (lecture_id,),
     ).fetchall()
     slide_ids = [r["id"] for r in slides]
+    slide_text = {r["id"]: r["text"] or "" for r in slides}
     images = {}
+    page_slides = set()  # slides whose image is a full PDF page render
     if slide_ids:
         ph = ",".join("?" * len(slide_ids))
         rows = conn.execute(
-            f"SELECT slide_id, path FROM slide_images WHERE slide_id IN ({ph}) "
+            f"SELECT slide_id, path, kind FROM slide_images WHERE slide_id IN ({ph}) "
             f"ORDER BY slide_id, seq",
             tuple(slide_ids),
         ).fetchall()
         for r in rows:
             images.setdefault(r["slide_id"], []).append(r["path"])
+            if r["kind"] == "page":
+                page_slides.add(r["slide_id"])
     conn.close()
 
     ocr_counts = 0
@@ -100,14 +105,26 @@ def run_ocr_for_lecture(lecture_id):
     try:
         for slide_id, paths in images.items():
             texts = []
+            no_ocr_engine = False
             for rel in paths:
                 abs_path = os.path.join(IMAGES_ROOT, rel)
                 if os.path.exists(abs_path):
                     t = _ocr_image(abs_path)
-                    if t.strip():
+                    if t is None:
+                        no_ocr_engine = True
+                    elif t.strip():
                         texts.append(t)
             joined = "\n".join(texts).strip()
-            if len(joined) < VISION_FALLBACK_MAX_CHARS and paths:
+            # Without an OCR engine (Windows/Linux) every PDF page render read as
+            # "no text", so EVERY page went to a paid vision call - a whole deck's
+            # worth on Windows vs a handful on Mac. A page render's text is the PDF
+            # text layer already extracted, so judge it by that instead: the same
+            # decision Mac's OCR of the page makes. (PPTX embedded images have no
+            # such stand-in and still go to vision.)
+            measured = joined
+            if no_ocr_engine and slide_id in page_slides:
+                measured = slide_text.get(slide_id, "").strip()
+            if len(measured) < VISION_FALLBACK_MAX_CHARS and paths:
                 first_abs = os.path.join(IMAGES_ROOT, paths[0])
                 if os.path.exists(first_abs):
                     try:
