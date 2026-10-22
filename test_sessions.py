@@ -103,16 +103,20 @@ def test_next_after_skips_instead_of_repeating():
     assert wrap["position"] == first["position"], "should wrap to the first unanswered"
 
 
-def test_tutor_answers_are_final_quiz_answers_can_change():
+def test_answers_can_change_but_tutor_keeps_the_miss():
     c = TestClient(M.app)
-    for mode, final in (("tutor", True), ("quiz", False)):
+    for mode, keeps_miss in (("tutor", True), ("quiz", False)):
         seed()
         add_q(1, 101)
         sid, _, _ = S.create_practice_session(lecture_ids=[1], target=1, time_mode=mode)
         qid = c.get(f"/api/sessions/{sid}/next").json()["question"]["id"]
         assert c.post(f"/api/sessions/{sid}/answer/{qid}", json={"selected_index": 1}).status_code == 200
         r = c.post(f"/api/sessions/{sid}/answer/{qid}", json={"selected_index": 0})
-        assert (r.status_code == 409) == final, (mode, r.status_code)
+        assert r.status_code == 200 and r.json()["correct"] and r.json()["revised"], (mode, r.json())
+        conn = db.get_conn()
+        unresolved = conn.execute("SELECT COUNT(*) FROM missed WHERE question_id=? AND resolved=0", (qid,)).fetchone()[0]
+        conn.close()
+        assert (unresolved == 1) == keeps_miss, (mode, unresolved)
 
 
 def test_weak_slides_include_zero_percent_but_need_two_answers():

@@ -17,14 +17,32 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "google/gemini-3.7-flash"
 # Different vendor than the default, so a Google outage doesn't take both down.
 BACKUP_MODEL = "anthropic/claude-haiku-5.5"
-# Suggestions shown in Settings - all image-capable and priced near the default.
-# Any other OpenRouter model id can still be typed in.
+# Suggestions shown in Settings - all image-capable. Default first, then every
+# Gemini Flash, then cheap alternatives from other vendors. Any other OpenRouter
+# model id can still be typed in ("Other" in the dropdown).
 SUGGESTED_MODELS = [
     DEFAULT_MODEL,
-    BACKUP_MODEL,
-    "openai/gpt-5.6-luna",
-    "qwen/qwen3.8-flash",
+    "~google/gemini-flash-latest",
     "google/gemini-3.8-flash",
+    "google/gemini-3.6-flash",
+    "google/gemini-3.5-flash",
+    "google/gemini-3.5-flash-lite",
+    "google/gemini-3.1-flash-lite",
+    "google/gemini-3-flash-preview",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-flash-lite",
+    BACKUP_MODEL,
+    "anthropic/claude-sonnet-5.5",
+    "openai/gpt-6-luna",
+    "openai/gpt-5.6-luna",
+    "openai/gpt-5.4-mini",
+    "qwen/qwen3.8-flash",
+    "qwen/qwen3.7-plus",
+    "x-ai/grok-4.7",
+    "mistralai/mistral-small-2603",
+    "meta-llama/llama-4-maverick",
+    "z-ai/glm-5.3-flash",
+    "xiaomi/mimo-v2.6-flash",
 ]
 
 MAX_OCR_CHARS_FOR_PROMPT = 1200

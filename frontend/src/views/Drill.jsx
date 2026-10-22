@@ -256,6 +256,7 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
   const [result, setResult] = useState(null); // {correct, explanation}
   const [nav, setNav] = useState([]);
   const answeredBefore = question.prior_selected_index !== null && question.prior_selected_index !== undefined;
+  const answered = answeredBefore || nav.some((n) => n.question_id === question.id && n.answered);
 
   useEffect(() => {
     setPending(question.prior_selected_index ?? null);
@@ -272,7 +273,7 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
 
   const submitting = useRef(false);
   async function submit() {
-    // Tutor-mode answers are final once revealed (the server enforces it too).
+    // Revealed = hit "Change answer" first to unlock the options.
     if (revealed || pending === null || submitting.current) return;
     submitting.current = true;
     try {
@@ -348,9 +349,11 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
         </div>
       )}
       <div className="quiz-nav">
-        {!revealed && (
+        {revealed ? (
+          <button className="btn" onClick={() => { setRevealed(false); setResult(null); }}>Change answer</button>
+        ) : (
           <button className="btn" disabled={pending === null} onClick={submit}>
-            {answeredBefore ? "Submit change" : "Submit"}
+            {answered ? "Submit change" : "Submit"}
           </button>
         )}
         <button className="btn ghost" onClick={() => onNext(undefined, question.position)}>Next</button>

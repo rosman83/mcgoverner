@@ -1020,8 +1020,8 @@ def api_answer(sid: int, question_id: int, body: Answer):
         raise HTTPException(404, "Not in session")
     qid = row["question_id"]
     correct = body.selected_index == row["correct_index"]
-    # Tutor mode shows the answer right after submitting, so changing it
-    # afterwards would just erase a real miss from the review queue.
+    # Tutor mode already showed the answer, so a change there may update the
+    # score but never clears a real miss from the review queue (below).
     tutor = conn.execute("SELECT tutor_mode FROM sessions WHERE id=?", (sid,)).fetchone()["tutor_mode"]
 
     # Re-answering a question you already did (fixing a misclick) updates the existing
@@ -1031,9 +1031,6 @@ def api_answer(sid: int, question_id: int, body: Answer):
         "SELECT id FROM answers WHERE session_id=? AND question_id=? ORDER BY id DESC LIMIT 1",
         (sid, qid),
     ).fetchone()
-    if prior and tutor:
-        conn.close()
-        raise HTTPException(409, "Already answered - answers are final in tutor mode.")
     if prior:
         conn.execute(
             "UPDATE answers SET correct=?, selected_index=?, answered_at=datetime('now') "
@@ -1057,7 +1054,7 @@ def api_answer(sid: int, question_id: int, body: Answer):
     # Tag wrong answers as missed (resolved on next-day review)
     if not correct:
         _tag_missed(conn, qid, row["lecture_id"])
-    else:
+    elif not (prior and tutor):
         # correct in a practice/review session -> mark resolved if it was missed
         conn.execute("UPDATE missed SET resolved=1 WHERE question_id=?", (qid,))
 

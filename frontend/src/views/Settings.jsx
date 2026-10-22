@@ -17,27 +17,59 @@ function Field({ f, values, setValues }) {
       </div>
     );
   }
+  if (f.options) return <PickField f={f} values={values} setValues={setValues} />;
   const isSecret = f.type === "secret";
   return (
     <div className="settings-field">
       <label>{f.label}</label>
       <input
         type={isSecret ? "password" : "text"}
-        placeholder={isSecret && f.set ? "Enter a new key to replace it" : (f.options?.[0] ?? "")}
-        list={f.options ? `${f.name}-options` : undefined}
+        placeholder={isSecret && f.set ? "Enter a new key to replace it" : ""}
         value={values[f.name] ?? (isSecret ? "" : f.display) ?? ""}
         onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
         autoComplete="off"
       />
-      {f.options && (
-        <datalist id={`${f.name}-options`}>
-          {f.options.map((o) => <option key={o} value={o} />)}
-        </datalist>
-      )}
       {isSecret && (
         <div className={f.set ? "status-set" : "help muted"}>
           {f.set ? `Set (${f.display})` : "Not set"}
         </div>
+      )}
+      <div className="help muted">{f.help}</div>
+    </div>
+  );
+}
+
+// A real dropdown of suggestions (a datalist hid everything but the current
+// value), with "Other" revealing a box to type any OpenRouter model id.
+// f.options[0] is the default, which is what a blank value means.
+function PickField({ f, values, setValues }) {
+  const current = values[f.name] ?? f.display ?? "";
+  const [custom, setCustom] = useState(!!current && !f.options.includes(current));
+  const set = (v) => setValues((vals) => ({ ...vals, [f.name]: v }));
+  return (
+    <div className="settings-field">
+      <label>{f.label}</label>
+      <select
+        value={custom ? "" : (current || f.options[0])}
+        onChange={(e) => {
+          if (e.target.value === "") { setCustom(true); return; }
+          setCustom(false);
+          set(e.target.value);
+        }}
+      >
+        {f.options.map((o, i) => <option key={o} value={o}>{o}{i === 0 ? " (default)" : ""}</option>)}
+        <option value="">Other (type a model id)…</option>
+      </select>
+      {custom && (
+        <input
+          type="text"
+          style={{ marginTop: 6 }}
+          placeholder="provider/model, e.g. google/gemini-3.7-flash"
+          value={current}
+          onChange={(e) => set(e.target.value)}
+          autoComplete="off"
+          autoFocus
+        />
       )}
       <div className="help muted">{f.help}</div>
     </div>
