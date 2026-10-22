@@ -71,6 +71,7 @@ export function Dashboard() {
   const [proj, setProj] = useState(null);
   const [err, setErr] = useState(null);
   const [importMsg, setImportMsg] = useState("");
+  const [dupFiles, setDupFiles] = useState([]); // [{file, title}] skipped as duplicates, offered "Import anyway"
   const [importUpload, setImportUpload] = useState(null); // {phase, pct} while a lecture upload is in flight
   const [lectures, setLectures] = useState([]);
   const [qsLectureId, setQsLectureId] = useState("");
@@ -81,6 +82,7 @@ export function Dashboard() {
   const [gapsShown, setGapsShown] = useState(PAGE);
 
   async function load() {
+    setErr(null);
     try {
       const [dash, projection, lex] = await Promise.all([
         api.get("/api/dashboard"),
@@ -104,16 +106,21 @@ export function Dashboard() {
     return onLecturesChanged(load);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleImport(files) {
+  async function handleImport(files, force = false) {
     setImportMsg("");
+    setDupFiles([]);
     setImportUpload({ phase: "uploading", pct: 0 });
     try {
       const fd = new FormData();
+      if (force) fd.append("force", "true");
       for (const f of files) fd.append("files", f);
       const res = await uploadWithProgress("/api/lectures/import", fd, setImportUpload);
       let msg = `Imported ${res.imported.length} lecture(s).`;
       if (res.imported.length) msg += " OCR, captions, and summaries are generating in the background.";
-      if (res.duplicates?.length) msg += ` Skipped ${res.duplicates.length} duplicate(s).`;
+      if (res.duplicates?.length) {
+        msg += ` Skipped ${res.duplicates.length} that look like duplicates: ${res.duplicates.map((d) => `${d.filename} (matches "${d.title}")`).join(", ")}.`;
+        setDupFiles(files.filter((f) => res.duplicates.some((d) => d.filename === f.name)));
+      }
       if (res.errors?.length) msg += ` Errors: ${res.errors.join("; ")}`;
       setImportMsg(msg);
       load();
@@ -146,7 +153,14 @@ export function Dashboard() {
     }
   }
 
-  if (err) return <div className="muted">Failed to load dashboard: {err}</div>;
+  if (err) {
+    return (
+      <div className="muted">
+        Failed to load dashboard: {err}{" "}
+        <button className="btn ghost sm" onClick={load}>Retry</button>
+      </div>
+    );
+  }
   if (!d) return <Spinner />;
 
   const weak = d.weak_slides || [];
@@ -177,6 +191,11 @@ export function Dashboard() {
               <Dropzone label="Drop PDF/PPTX lecture files here, or click to browse" accept=".pdf,.pptx" disabled={!!importUpload} onFiles={handleImport} />
               <UploadProgress state={importUpload} />
               {importMsg && <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>{importMsg}</div>}
+              {dupFiles.length > 0 && (
+                <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => handleImport(dupFiles, true)}>
+                  Import anyway
+                </button>
+              )}
             </>
           ) : (
             <div className="narrow-col">

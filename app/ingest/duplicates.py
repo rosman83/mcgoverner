@@ -78,14 +78,12 @@ def detect_duplicate(text, threshold=0.55, lecture_ids=None, existing_include_oc
     return None
 
 
-def detect_duplicate_file(path, lecture_ids=None):
-    """Detect duplicate from a file path (extracts text fresh, text-only compare)."""
-    from app.ingest.slides import extract_pdf, extract_pptx
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".pdf":
-        slides = extract_pdf(path)
-    else:
-        slides = extract_pptx(path)
+def detect_duplicate_file(path, lecture_ids=None, slides=None):
+    """Detect duplicate from a file path (text-only compare). Pass `slides` to
+    reuse an already-parsed deck instead of parsing the file again."""
+    from app.ingest.slides import extract_slides
+    if slides is None:
+        slides = extract_slides(path)
     text = " ".join(t for _, t in slides)
     return detect_duplicate(
         text, lecture_ids=lecture_ids, existing_include_ocr=False

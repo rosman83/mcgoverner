@@ -14,6 +14,7 @@ CAPTION_SYSTEM = (
 
 CAPTION_BATCH_SIZE = 10   # slides per API call
 CAPTION_WORKERS = 4       # concurrent calls
+REDUNDANT_OCR_JACCARD = 0.8   # OCR this similar to the slide text isn't worth a caption
 
 # Static instructions first, variable slide text last, so the prefix stays cacheable
 # across every batch (see the same treatment in sessiongen.QUESTION_BATCH_PROMPT).
@@ -49,7 +50,13 @@ def _slides_needing_captions(lecture_id):
         (lecture_id,),
     ).fetchall()
     conn.close()
-    return rows
+    # A PDF page's OCR mostly repeats its own text layer: captioning that pays
+    # twice for nothing. Keep only slides whose image text adds something.
+    from app.ingest.duplicates import _tokens, _jaccard
+    return [
+        r for r in rows
+        if _jaccard(_tokens(r["ocr_text"]), _tokens(r["text"] or "")) <= REDUNDANT_OCR_JACCARD
+    ]
 
 
 def _build_batch_prompt(title, batch):
