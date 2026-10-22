@@ -74,10 +74,10 @@ def _with_thumb_url(d):
     return d
 
 
-def weak_slides(limit=30, max_accuracy=0.85, min_answers=1):
+def weak_slides(limit=30, max_accuracy=0.85, min_answers=2):
     """Slides with the worst answer accuracy (only genuinely weak ones).
-    Excludes 0% accuracy - a single unlucky guess reading as "0%" is noise,
-    not a meaningful weak-slide signal to act on.
+    Needs >= 2 answers so one unlucky guess is noise - but a slide missed every
+    time (0%) is the weakest of all and must show.
 
     HAVING/ORDER BY use the full aggregate expressions rather than the
     `answers`/`correct` SELECT aliases on purpose: the `answers` table (joined
@@ -100,7 +100,7 @@ def weak_slides(limit=30, max_accuracy=0.85, min_answers=1):
         "JOIN questions q ON q.slide_id=s.id "
         "JOIN answers a ON a.question_id=q.id "
         "GROUP BY s.id "
-        "HAVING COUNT(a.id) >= ? AND SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END) > 0 "
+        "HAVING COUNT(a.id) >= ? "
         "ORDER BY SUM(CASE WHEN a.correct=1 THEN 1 ELSE 0 END)*1.0/COUNT(a.id) ASC "
         "LIMIT ?",
         (min_answers, limit),

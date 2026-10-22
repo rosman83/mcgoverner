@@ -133,10 +133,11 @@ def _strip_letter_prefix(text):
 # are never asked questions about slides/images/lectures they cannot see.
 _FORBIDDEN_STEM = re.compile(
     r"\b(this slide|the slide|the image above|the figure above|the diagram above|"
-    r"this lecture|the lecture|this module|the module|as discussed|as shown|"
+    r"this lecture|the lecture|this module|the module|as discussed|"
+    r"as shown (in|on) (the|this) (slide|lecture|figure|image|diagram)|"
     r"textbook|course objective|learning objective|syllabus|grading|"
     r"this course|our course|how to study|the exam will cover|"
-    r"summariz\w*|recap\b|reviewing (the|this|our))\b",
+    r"summary of (the|this) (lecture|slide)|recap\b|reviewing (the|this|our))\b",
     re.IGNORECASE,
 )
 
@@ -462,6 +463,29 @@ def select_professor_questions(lecture_ids=None, k=0):
     return [r["id"] for r in rows]
 
 
+def select_unanswered_questions(lecture_ids=None, k=0):
+    """Up to k generated questions nobody has answered yet and that aren't in an
+    active session, for the chosen lectures."""
+    if k <= 0:
+        return []
+    where = "q.source='session' AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id=q.id)"
+    # ponytail: any session, not just active ones - an abandoned/completed
+    # session's unanswered questions are exactly what we want back; only skip
+    # ones sitting in a still-active session so one isn't served twice at once.
+    where += (" AND NOT EXISTS (SELECT 1 FROM session_questions sq JOIN sessions s ON s.id=sq.session_id "
+              "WHERE sq.question_id=q.id AND s.status='active')")
+    params = []
+    if lecture_ids:
+        where += " AND q.lecture_id IN (" + ",".join("?" * len(lecture_ids)) + ")"
+        params.extend(lecture_ids)
+    conn = get_conn()
+    rows = conn.execute(
+        f"SELECT q.id FROM questions q WHERE {where} ORDER BY RANDOM() LIMIT ?", (*params, k)
+    ).fetchall()
+    conn.close()
+    return [r["id"] for r in rows]
+
+
 QUIZ_SECONDS_PER_QUESTION = 90  # 1.5 min per question in quiz mode
 
 
@@ -476,11 +500,14 @@ def create_practice_session(lecture_ids=None, target=MAX_QUESTIONS, time_mode="t
     rest from slides, store them.
     Returns (session_id, question_count, error). On failure nothing is persisted and
     `error` explains why. lecture_ids: list of lectures to draw from (None/empty = all)."""
-    if target > MAX_QUESTIONS:
-        target = MAX_QUESTIONS
+    target = max(1, min(int(target), MAX_QUESTIONS))
 
     # Professor questions come first and are free; only the shortfall is generated.
     prof_ids = select_professor_questions(lecture_ids, int(target * PROFESSOR_MIX))
+    # Generated-but-never-answered questions are already paid for (36% of the
+    # bank was wasted this way) - reuse them before generating more.
+    reused_ids = select_unanswered_questions(lecture_ids, target - len(prof_ids))
+    prof_ids = prof_ids + reused_ids
     target_generated = target - len(prof_ids)
 
     used_ids = []
@@ -570,9 +597,9 @@ def create_practice_session(lecture_ids=None, target=MAX_QUESTIONS, time_mode="t
     return sid, len(qids), None
 
 
-def create_review_session(lecture_ids=None, time_mode="tutor"):
-    """Create a review session from unresolved missed questions.
-    lecture_ids: restrict to the given lectures (None/empty = all)."""
+def create_review_session(lecture_ids=None, time_mode="tutor", target=MAX_QUESTIONS):
+    """Create a review session from unresolved missed questions (oldest first,
+    at most `target`). lecture_ids: restrict to the given lectures (None/empty = all)."""
     conn = get_conn()
     if lecture_ids:
         ph = ",".join("?" * len(lecture_ids))
@@ -584,7 +611,7 @@ def create_review_session(lecture_ids=None, time_mode="tutor"):
         rows = conn.execute(
             "SELECT DISTINCT question_id FROM missed WHERE resolved=0 ORDER BY missed_at"
         ).fetchall()
-    qids = [r["question_id"] for r in rows]
+    qids = [r["question_id"] for r in rows][:max(1, min(int(target), MAX_QUESTIONS))]
     if not qids:
         conn.close()
         return None, 0

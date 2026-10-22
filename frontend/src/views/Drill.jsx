@@ -88,7 +88,7 @@ function SourceBlock({ images, slide, source, onCite }) {
     <div style={{ marginTop: 10 }}>
       {images?.length > 0 && (
         <div className="src-imgs">
-          {images.map((u) => <img key={u} className="slide-thumb-lg" src={u} alt="" />)}
+          {images.map((u) => <img key={u} className="slide-thumb-lg" src={u} alt={slide?.caption || "Lecture slide"} />)}
         </div>
       )}
       {cite}
@@ -107,11 +107,11 @@ function SlideModal({ lectureId, slideNum, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <button className="icon-btn modal-close" onClick={onClose}>×</button>
+        <button className="icon-btn modal-close" aria-label="Close" onClick={onClose}>×</button>
         {!slide ? <div className="muted">Loading…</div> : (
           <>
             <h3>{slide.lecture_title} · Slide {slide.slide_num}</h3>
-            {slide.images?.map((u) => <img key={u} className="slide-modal-img" src={u} alt="" />)}
+            {slide.images?.map((u) => <img key={u} className="slide-modal-img" src={u} alt={slide.caption || "Lecture slide"} />)}
             <p>{slide.text}</p>
           </>
         )}
@@ -234,12 +234,10 @@ function Setup({ onStarted }) {
               : "Total time = 1.5 min/question; no explanation until the end."}
           </div>
         </div>
-        {mode === "practice" && (
-          <div className="settings-field">
-            <label>Number of questions (max 59)</label>
-            <input type="number" min={1} max={59} value={target} onChange={(e) => setTarget(e.target.value)} style={{ maxWidth: 100 }} />
-          </div>
-        )}
+        <div className="settings-field">
+          <label>Number of questions (max 59)</label>
+          <input type="number" min={1} max={59} value={target} onChange={(e) => setTarget(e.target.value)} style={{ maxWidth: 100 }} />
+        </div>
         <div className="settings-actions">
           <button className="btn" disabled={starting} onClick={start}>Start session</button>
           <span className="muted">{status}</span>
@@ -249,7 +247,7 @@ function Setup({ onStarted }) {
   );
 }
 
-function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer, cite }) {
+function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer, cite, modalOpen }) {
   const [pending, setPending] = useState(question.prior_selected_index ?? null);
   const [revealed, setRevealed] = useState(false);
   const [result, setResult] = useState(null); // {correct, explanation}
@@ -269,16 +267,47 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
     try { setNav(await api.get(`/api/sessions/${sid}/nav`)); } catch { setNav([]); }
   }
 
+  const submitting = useRef(false);
   async function submit() {
-    if (revealed) { setRevealed(false); setResult(null); return; }
-    if (pending === null) return;
-    const res = await api.post(`/api/sessions/${sid}/answer/${question.id}`, { selected_index: pending });
-    setResult({ correct: res.correct, explanation: res.explanation });
-    await onAnswered(res);
-    await loadNav();
-    if (tutorMode) { stopTimer(); setRevealed(true); }
-    else onNext();
+    // Tutor-mode answers are final once revealed (the server enforces it too).
+    if (revealed || pending === null || submitting.current) return;
+    submitting.current = true;
+    try {
+      const res = await api.post(`/api/sessions/${sid}/answer/${question.id}`, { selected_index: pending });
+      setResult({ correct: res.correct, explanation: res.explanation });
+      await onAnswered(res);
+      await loadNav();
+      if (tutorMode) { stopTimer(); setRevealed(true); }
+      else onNext(undefined, question.position);
+    } finally {
+      submitting.current = false;
+    }
   }
+
+  // Keyboard: A-E / 1-5 pick, Enter submits (or moves on once revealed), -> next.
+  // The handler lives in a ref so the single listener always sees current state.
+  const keyRef = useRef(null);
+  keyRef.current = (e) => {
+    if (modalOpen || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const k = e.key.toLowerCase();
+    const idx = "abcde".indexOf(k) >= 0 ? "abcde".indexOf(k) : "12345".indexOf(k);
+    if (k.length === 1 && idx >= 0) {
+      if (!revealed && idx < question.options.length) setPending(idx);
+    } else if (k === "enter") {
+      e.preventDefault(); // otherwise a focused option button also "clicks"
+      if (revealed) onNext(undefined, question.position); else submit();
+    } else if (k === "arrowright") {
+      e.preventDefault();
+      onNext(undefined, question.position);
+    }
+  };
+  useEffect(() => {
+    const h = (e) => keyRef.current?.(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   const letters = "ABCDE";
   return (
@@ -294,6 +323,8 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
           return (
             <button key={i} className={cls} disabled={revealed} onClick={() => setPending(i)}>
               <strong>{letters[i]}.</strong> {o}
+              {revealed && i === question.correct_index && <span className="mark" aria-label="correct"> ✓</span>}
+              {revealed && i === pending && i !== question.correct_index && <span className="mark" aria-label="your answer, incorrect"> ✗</span>}
             </button>
           );
         })}
@@ -314,10 +345,12 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
         </div>
       )}
       <div className="quiz-nav">
-        <button className="btn" disabled={pending === null && !revealed} onClick={submit}>
-          {revealed ? "Change answer" : answeredBefore ? "Submit change" : "Submit"}
-        </button>
-        <button className="btn ghost" onClick={() => onNext()}>Next</button>
+        {!revealed && (
+          <button className="btn" disabled={pending === null} onClick={submit}>
+            {answeredBefore ? "Submit change" : "Submit"}
+          </button>
+        )}
+        <button className="btn ghost" onClick={() => onNext(undefined, question.position)}>Next</button>
       </div>
       {nav.length > 0 && (
         <div className="qnav-wrap">
@@ -326,9 +359,11 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
               const cls = ["qnav-btn"];
               if (n.question_id === question.id) cls.push("current");
               if (n.answered) cls.push(tutorMode ? (n.correct ? "ok" : "bad") : "done");
+              const state = !n.answered ? "unanswered" : tutorMode ? (n.correct ? "correct" : "incorrect") : "answered";
               return (
-                <button key={n.question_id} className={cls.join(" ")} onClick={() => onNext(n.question_id)}>
+                <button key={n.question_id} className={cls.join(" ")} aria-label={`Question ${n.position + 1}, ${state}`} onClick={() => onNext(n.question_id)}>
                   {n.position + 1}
+                  {n.answered && tutorMode && <span className="qmark" aria-hidden="true">{n.correct ? "✓" : "✗"}</span>}
                 </button>
               );
             })}
@@ -462,6 +497,12 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
   const [citeTarget, setCiteTarget] = useState(null); // {lectureId, slideNum}
   const quizTotalRef = useRef(0);
   const timerRef = useRef(null);
+  // The countdown interval and the pagehide handler outlive the render that
+  // created them, so they must read the CURRENT session/clock from refs - a
+  // closed-over `sid` was null (or the previous session) when the timer fired.
+  const sidRef = useRef(null);
+  const secondsRef = useRef(0);
+  secondsRef.current = seconds;
 
   function stopTimer() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -471,7 +512,7 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
     setSeconds(0);
     timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
   }
-  function startCountDown(startAt) {
+  function startCountDown(startAt, id) {
     stopTimer();
     setSeconds(Math.max(0, startAt));
     let s = Math.max(0, startAt);
@@ -480,7 +521,7 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
       setSeconds(s);
       if (s <= 0) {
         stopTimer();
-        onTimeout();
+        onTimeout(id);
       }
     }, 1000);
   }
@@ -496,21 +537,46 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
     }
   }, [openSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function pauseIfQuizActive() {
-    if (!quizActive || !sid || tutorMode) return;
-    const elapsed = Math.max(0, quizTotalRef.current - seconds);
-    setQuizActive(false);
-    stopTimer();
-    try { await api.post(`/api/sessions/${sid}/pause`, { elapsed_sec: Math.round(elapsed) }); } catch { /* best effort */ }
+  function quizElapsed() {
+    return Math.max(0, Math.round(quizTotalRef.current - secondsRef.current));
   }
 
-  async function onTimeout() {
+  async function pauseIfQuizActive() {
+    if (!quizActive || !sid || tutorMode) return;
     setQuizActive(false);
-    try { await api.post(`/api/sessions/${sid}/timeout`); } catch { /* best effort */ }
+    stopTimer();
+    try { await api.post(`/api/sessions/${sid}/pause`, { elapsed_sec: quizElapsed() }); } catch { /* best effort */ }
+  }
+
+  // Save quiz time every 15s and when the tab closes/reloads - only Pause used
+  // to preserve it, so anything else restarted the full clock on resume.
+  useEffect(() => {
+    if (!quizActive || tutorMode || !sid) return;
+    const save = () => fetch(`/api/sessions/${sid}/pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ elapsed_sec: quizElapsed() }),
+      keepalive: true,
+    }).catch(() => {});
+    const iv = setInterval(save, 15000);
+    window.addEventListener("pagehide", save);
+    return () => { clearInterval(iv); window.removeEventListener("pagehide", save); };
+  }, [quizActive, tutorMode, sid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function onTimeout(id = sidRef.current) {
+    setQuizActive(false);
+    stopTimer();
+    try { await api.post(`/api/sessions/${id}/timeout`); } catch { /* best effort */ }
     setScreen("review");
   }
 
+  async function endTest() {
+    if (!window.confirm("End the test now? Every unanswered question will be marked incorrect.")) return;
+    await onTimeout(sid);
+  }
+
   async function openSession(id) {
+    sidRef.current = id;
     setSid(id);
     stopTimer();
     setQuizActive(false);
@@ -525,7 +591,7 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
       if (!isTutor) {
         const elapsed = sess.session.elapsed_sec || 0;
         setQuizActive(true);
-        startCountDown(quizTotalRef.current - elapsed);
+        startCountDown(quizTotalRef.current - elapsed, id);
       }
       await loadNext(id);
       if (isTutor) startCountUp();
@@ -538,15 +604,18 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
     startCountUp();
   }
 
-  async function loadNext(id, qid) {
+  // `after`: position of the question being left, so Next skips ahead.
+  // Returns the loaded question id (null when the session is done).
+  async function loadNext(id, qid, after) {
     const sessionId = id || sid;
     const res = qid
       ? await api.get(`/api/sessions/${sessionId}/question/${qid}`)
-      : await api.get(`/api/sessions/${sessionId}/next`);
-    if (res.done) { setScreen("review"); return; }
+      : await api.get(`/api/sessions/${sessionId}/next${after != null ? `?after=${after}` : ""}`);
+    if (res.done) { setScreen("review"); return null; }
     setQuestion(res.question);
     const sess = await api.get(`/api/sessions/${sessionId}`);
     setProgress(`${sess.session.completed_count} of ${sess.session.target_count} answered · ${sess.session.tutor_mode ? "Tutor" : "Quiz"}`);
+    return res.question.id;
   }
 
   async function handleAnswered() {
@@ -555,6 +624,7 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
 
   function backToSetup() {
     stopTimer();
+    sidRef.current = null;
     setSid(null);
     setQuestion(null);
     setScreen("setup");
@@ -574,6 +644,9 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
                   {!tutorMode ? "− " : ""}{fmtClock(seconds)}
                 </div>
               )}
+              {!tutorMode && quizActive && (
+                <button className="btn ghost sm" onClick={endTest}>End test</button>
+              )}
               <button className="btn danger sm" onClick={async () => { await pauseIfQuizActive(); backToSetup(); }}>
                 Pause session
               </button>
@@ -584,7 +657,14 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
             question={question}
             tutorMode={tutorMode}
             onAnswered={handleAnswered}
-            onNext={(qid) => { if (tutorMode) startCountUp(); loadNext(sid, qid); }}
+            onNext={async (qid, after) => {
+              // Only restart the tutor clock when we actually moved to a different
+              // question - Next on the last unanswered one reloads the same.
+              const shownId = question.id;
+              const loaded = await loadNext(sid, qid, after);
+              if (tutorMode && loaded != null && loaded !== shownId) startCountUp();
+            }}
+            modalOpen={!!citeTarget}
             stopTimer={stopTimer}
             cite={(lectureId, slideNum) => setCiteTarget({ lectureId, slideNum })}
           />
