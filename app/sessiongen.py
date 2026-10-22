@@ -416,9 +416,12 @@ def _gen_batch(batch):
 
 def generate_questions_for_slides(slides, batch_size=BATCH_SIZE, max_workers=4):
     """Generate questions for slides in concurrent batched API calls.
-    Returns list of dicts ready to store (slide-anchored)."""
+    Returns list of dicts ready to store (slide-anchored). One failed batch is
+    tolerated; if EVERY batch fails, the first error is raised so the user sees
+    why (bad key, no credit, model down) instead of a vague "check the log"."""
     batches = [slides[i:i + batch_size] for i in range(0, len(slides), batch_size)]
     out = []
+    errors = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = [ex.submit(_gen_batch, b) for b in batches]
         for fut in as_completed(futures):
@@ -426,6 +429,9 @@ def generate_questions_for_slides(slides, batch_size=BATCH_SIZE, max_workers=4):
                 out.extend(fut.result())
             except Exception as e:
                 print(f"batch question generation failed: {e}")
+                errors.append(e)
+    if errors and len(errors) == len(batches):
+        raise errors[0]
     return out
 
 
@@ -493,7 +499,12 @@ def create_practice_session(lecture_ids=None, target=MAX_QUESTIONS, time_mode="t
             break
         saw_slides = True
         used_ids.extend(s["slide_id"] for s in slides)
-        got = generate_questions_for_slides(slides)
+        try:
+            got = generate_questions_for_slides(slides)
+        except Exception:
+            if questions or prof_ids:
+                break  # a top-up round failed - keep the session we already have
+            raise
         if not got:
             break
         questions.extend(got)

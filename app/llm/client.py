@@ -2,20 +2,30 @@ import base64
 import os
 import json
 import re
+import time
 
+import openai
 from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
 
-# Everyone defaults to OpenRouter + one fixed model, for both text and vision -
-# no per-user provider/model picking anymore. This model is multimodal (text +
-# image in one call), so text generation and the vision fallback both use it;
-# that also means there's a real path later to fold vision straight into the
-# question/summary prompts instead of a separate captioning pass, though
-# that's not done here - this change is just the provider/config simplification.
+# Everyone uses OpenRouter + one model, for both text and vision. The model is
+# picked in Settings (OPENROUTER_MODEL) so people aren't stuck when Gemini has a
+# bad day; every choice must accept images, since vision uses it too.
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "google/gemini-3.7-flash"
+# Different vendor than the default, so a Google outage doesn't take both down.
+BACKUP_MODEL = "anthropic/claude-haiku-5.5"
+# Suggestions shown in Settings - all image-capable and priced near the default.
+# Any other OpenRouter model id can still be typed in.
+SUGGESTED_MODELS = [
+    DEFAULT_MODEL,
+    BACKUP_MODEL,
+    "openai/gpt-5.6-luna",
+    "qwen/qwen3.8-flash",
+    "google/gemini-3.8-flash",
+]
 
 # Advanced, opt-in, TEXT-ONLY override for people who already have DeepSeek
 # credit to use up (see app/config.py for the toggle + migration). Vision
@@ -44,10 +54,21 @@ def _use_deepseek_for_text():
     return enabled and bool(os.environ.get("DEEPSEEK_API_KEY"))
 
 
+def openrouter_model():
+    return (os.environ.get("OPENROUTER_MODEL") or "").strip() or DEFAULT_MODEL
+
+
+def _openrouter_fallback(model):
+    """OpenRouter's native `models` routing: if the chosen model errors, is
+    rate-limited, or is down, OpenRouter retries the next one server-side."""
+    backup = BACKUP_MODEL if model != BACKUP_MODEL else DEFAULT_MODEL
+    return {"models": [model, backup]}
+
+
 def active_model():
     if _use_deepseek_for_text():
         return "deepseek", DEEPSEEK_MODEL
-    return "openrouter", DEFAULT_MODEL
+    return "openrouter", openrouter_model()
 
 
 def get_client():
@@ -63,8 +84,8 @@ def get_client():
                 "OPENROUTER_API_KEY not set. Add it in Settings — get one at openrouter.ai/keys."
             )
         base_url = OPENROUTER_BASE_URL
-    # max_retries=0: chat_json owns retry policy. The SDK default (2) multiplies with
-    # it, turning one logical call into up to 9 billed requests.
+    # max_retries=0: _complete() owns retry policy (the SDK's would also retry
+    # timeouts, which can bill twice for one answer).
     return OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=180)
 
 
@@ -99,45 +120,88 @@ def _record_usage(resp, kind, provider_name=None, model_name=None):
         print(f"usage logging failed: {e}")
 
 
+class LLMError(RuntimeError):
+    """An AI request failed in a way the user can act on. main.py shows the
+    message as-is instead of a generic 'something went wrong'."""
+
+
 def _friendly_api_error(e):
-    """Re-raise API errors with an actionable message instead of a raw SDK
-    exception - 'error code 401' means nothing to a non-technical user, but
-    'your OpenRouter key looks invalid or has run out of credit' does."""
-    msg = str(e)
+    """Turn an SDK exception into an LLMError with an actionable message -
+    'error code 401' means nothing to a non-technical user."""
     status = getattr(e, "status_code", None)
-    if status == 401 or "401" in msg:
-        return RuntimeError(
-            "The API key was rejected (401). It may be invalid, revoked, or the wrong "
-            "kind of key - check it in Settings."
-        )
-    if status == 402 or "402" in msg or "credit" in msg.lower() or "insufficient" in msg.lower():
-        return RuntimeError(
-            "The API request was rejected for billing (402) - the account is likely out "
-            "of credit. Add more at openrouter.ai (or platform.deepseek.com) and try again."
-        )
-    return e
+    # Prefer the provider's own message over the SDK's "Error code: 400 - {raw dict}".
+    body = getattr(e, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        body = body["error"]
+    detail = body.get("message") if isinstance(body, dict) else None
+    detail = (detail or getattr(e, "message", None) or str(e))[:300]
+    if isinstance(e, openai.APITimeoutError):
+        msg = "The AI took too long to respond. Try again - if it keeps happening, pick a different model in Settings."
+    elif isinstance(e, openai.APIConnectionError):
+        msg = "Couldn't reach the AI provider. Check your internet connection (a VPN or firewall can block it)."
+    elif status == 401:
+        msg = "The API key was rejected (401). It may be invalid, revoked, or the wrong kind of key - check it in Settings."
+    elif status == 402 or "credit" in detail.lower() or "insufficient" in detail.lower():
+        msg = ("The API request was rejected for billing (402) - the account is likely out of credit. "
+               "Add more at openrouter.ai (or platform.deepseek.com) and try again.")
+    elif status == 429:
+        msg = "The AI provider is rate-limiting requests right now. Wait a minute and try again."
+    elif status and status >= 500:
+        msg = "The AI provider is having problems right now. Try again shortly, or pick a different model in Settings."
+    elif status in (400, 404) and "model" in detail.lower():
+        msg = f"The selected model isn't available ({detail}). Pick a different model in Settings."
+    else:
+        msg = f"The AI request failed: {detail}"
+    return LLMError(msg)
+
+
+# Not billed when they fail, so safe to retry. Timeouts are NOT retried: the
+# provider may have finished (and charged for) the answer we gave up on.
+_TRANSIENT = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
+
+
+def _complete(client, kind, provider_name, **kwargs):
+    """One chat completion with retries on transient failures. Returns the
+    reply text, "" if the model sent back nothing (chat_json retries that)."""
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(**kwargs)
+            break
+        except openai.APITimeoutError as e:
+            raise _friendly_api_error(e)
+        except _TRANSIENT as e:
+            if attempt == 2:
+                raise _friendly_api_error(e)
+            time.sleep(2 * 2 ** attempt)
+        except Exception as e:
+            raise _friendly_api_error(e)
+    # resp.model is what actually answered - may be the fallback, not kwargs["model"].
+    _record_usage(resp, kind, provider_name=provider_name, model_name=getattr(resp, "model", None))
+    # OpenRouter can return 200 with no choices (upstream error) or null content
+    # (e.g. a safety block, or reasoning that ate the whole token budget).
+    if not resp.choices:
+        return ""
+    return (resp.choices[0].message.content or "").strip()
 
 
 def chat(prompt, system=None, temperature=0.7, max_tokens=2000, json_mode=False, kind=None):
     client = get_client()
+    provider, model = active_model()
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     kwargs = dict(
-        model=active_model()[1],
+        model=model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    try:
-        resp = client.chat.completions.create(**kwargs)
-    except Exception as e:
-        raise _friendly_api_error(e)
-    _record_usage(resp, kind)
-    return resp.choices[0].message.content.strip()
+    if provider == "openrouter":
+        kwargs["extra_body"] = _openrouter_fallback(model)
+    return _complete(client, kind, provider, **kwargs)
 
 
 def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, kind=None):
@@ -160,18 +224,20 @@ def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, 
     )
     last_err = None
     for _ in range(retries + 1):
-        try:
-            raw = chat(
-                prompt, system=sys, temperature=temperature,
-                max_tokens=max_tokens, json_mode=True, kind=kind,
-            )
-        except Exception:
-            raise  # API-level failure: retrying the same request cannot fix it
+        # API-level failures raise straight out of chat(): retrying the same
+        # request here cannot fix them (chat already retried transient ones).
+        raw = chat(
+            prompt, system=sys, temperature=temperature,
+            max_tokens=max_tokens, json_mode=True, kind=kind,
+        )
         try:
             return _parse_json(raw)
         except (ValueError, TypeError) as e:
             last_err = e
-    raise last_err
+    raise LLMError(
+        f"The AI sent back an unreadable reply {retries + 1} times in a row. Try again, "
+        "or pick a different model in Settings."
+    ) from last_err
 
 
 def describe_image(image_path, prompt, max_tokens=500, kind="vision"):
@@ -184,23 +250,21 @@ def describe_image(image_path, prompt, max_tokens=500, kind="vision"):
         b64 = base64.b64encode(f.read()).decode()
     ext = os.path.splitext(image_path)[1].lstrip(".").lower() or "jpeg"
     client = OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL, max_retries=0, timeout=180)
-    try:
-        resp = client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64}"}},
-                ],
-            }],
-            max_tokens=max_tokens,
-            temperature=0.3,
-        )
-    except Exception as e:
-        raise _friendly_api_error(e)
-    _record_usage(resp, kind, provider_name="openrouter", model_name=DEFAULT_MODEL)
-    return resp.choices[0].message.content.strip()
+    model = openrouter_model()
+    return _complete(
+        client, kind, "openrouter",
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64}"}},
+            ],
+        }],
+        max_tokens=max_tokens,
+        temperature=0.3,
+        extra_body=_openrouter_fallback(model),
+    )
 
 
 def _parse_json(raw):

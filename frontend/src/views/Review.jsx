@@ -114,7 +114,7 @@ export function Review({ onOpenSession }) {
     fd.append("mode", "review");
     fd.append("time_mode", "tutor");
     fd.append("lecture_ids", lectureId);
-    const res = await fetch("/api/sessions", { method: "POST", body: fd }).then((r) => r.json());
+    const res = await api.post("/api/sessions", fd);
     if (res.session_id) {
       notifySessionsChanged();
       onOpenSession(res.session_id);

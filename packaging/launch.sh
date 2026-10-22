@@ -74,23 +74,21 @@ fetch_code() {
   rsync -a --delete \
     --exclude=.env --exclude=data --exclude=lectures --exclude=.venv --exclude=.git \
     "$src"/ "$INSTALL_DIR"/ >> "$RUN_LOG" 2>&1
-  rm -rf "$tmp"
 
-  # Stamp the actual commit hash just downloaded into a .version file, so
-  # main.py can show something more useful than "dev" (git rev-parse always
-  # fails here - this zip download has no .git). Best-effort: written after
-  # rsync's mirror pass so it's never itself deleted by --delete, and a
-  # failure here (offline, GitHub rate limit, unexpected API response shape)
-  # just leaves the app showing "dev" - nothing else depends on this
-  # succeeding. No jq/python dependency - grep+sed only, since this step runs
-  # before this script has set up anything else on the machine.
+  # Stamp the commit hash just downloaded into .version, so main.py can show
+  # it (no .git here for `git rev-parse`) and tell when an update is out.
+  # GitHub writes the full commit SHA into the archive zip's comment, so this
+  # is exactly the code just unpacked - no API call, no rate limit. (This used
+  # to grep the commits API with a greedy sed; GitHub returns that JSON on one
+  # line, so it grabbed the LAST "sha" - a file's blob hash - and every Mac
+  # install showed "Update available" forever.) Written after rsync's mirror
+  # pass so --delete never removes it; failure just leaves the app on "dev".
   local sha
-  sha="$(curl -sL --max-time 10 -H "User-Agent: McGoverner-Launcher" \
-    "https://api.github.com/repos/rosman83/mcgoverner/commits/${REPO_BRANCH}" 2>/dev/null \
-    | grep -m1 '"sha"' | sed -E 's/.*"sha": *"([^"]+)".*/\1/' | cut -c1-7)"
+  sha="$(unzip -z "$tmp/repo.zip" 2>/dev/null | grep -m1 -oE '^[0-9a-f]{40}$' | cut -c1-7)"
   if [ -n "$sha" ]; then
     echo "$sha" > "$INSTALL_DIR/.version"
   fi
+  rm -rf "$tmp"
 }
 
 # If this app is running from inside an existing checkout of this repo (a local

@@ -26,7 +26,7 @@ export function UpdateAlert({ usage }) {
         <div className="card" style={{ position: "absolute", right: 0, top: 40, width: 240, zIndex: 30 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>A new version is out</div>
           <div className="muted" style={{ fontSize: 13 }}>
-            You're on build {usage.version} - the latest is {usage.latest_version}.
+            You're on build {usage.version}, {usage.updates_behind} update{usage.updates_behind === 1 ? "" : "s"} behind.
             Close this window and relaunch McGoverner to update.
           </div>
         </div>

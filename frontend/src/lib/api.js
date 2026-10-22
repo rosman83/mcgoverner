@@ -7,11 +7,21 @@
 // concern each screen should have to handle individually, so it's also
 // broadcast as a window event - App.jsx shows a toast for anything a view
 // didn't already catch itself, so a crash is never just silently vague.
+// Our exception handler sends {message, error_id}; FastAPI's HTTPException
+// sends {detail: "..."} (validation errors send a detail list - not shown).
+function errorMessage(body) {
+  if (body?.message) return `${body.message}${body.error_id ? ` (ref: ${body.error_id})` : ""}`;
+  if (typeof body?.detail === "string") return body.detail;
+  return null;
+}
+
 async function request(path, options = {}) {
   let res;
   try {
+    // FormData (file/session forms) must let the browser set its own multipart header.
+    const json = options.body && !(options.body instanceof FormData);
     res = await fetch(path, {
-      headers: options.body ? { "Content-Type": "application/json" } : undefined,
+      headers: json ? { "Content-Type": "application/json" } : undefined,
       ...options,
     });
   } catch {
@@ -23,9 +33,7 @@ async function request(path, options = {}) {
   if (!res.ok && res.status !== 400) {
     let body = null;
     try { body = await res.json(); } catch { /* not JSON - fine, body stays null */ }
-    const message = body?.message
-      ? `${body.message}${body.error_id ? ` (ref: ${body.error_id})` : ""}`
-      : `${options.method || "GET"} ${path} failed: ${res.status}`;
+    const message = errorMessage(body) || `${options.method || "GET"} ${path} failed: ${res.status}`;
     const err = new Error(message);
     err.status = res.status;
     err.body = body;
@@ -37,7 +45,10 @@ async function request(path, options = {}) {
 
 export const api = {
   get: (path) => request(path),
-  post: (path, body) => request(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }),
+  post: (path, body) => request(path, {
+    method: "POST",
+    body: body === undefined || body instanceof FormData ? body : JSON.stringify(body),
+  }),
   patch: (path, body) => request(path, { method: "PATCH", body: JSON.stringify(body) }),
   del: (path) => request(path, { method: "DELETE" }),
 };
@@ -57,10 +68,14 @@ export function uploadWithProgress(path, formData, onProgress) {
     };
     xhr.upload.onload = () => onProgress?.({ phase: "processing", pct: 100 });
     xhr.onload = () => {
-      try {
-        resolve(JSON.parse(xhr.responseText));
-      } catch {
-        reject(new Error(`Upload failed: bad response (${xhr.status})`));
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      // A 500 used to resolve as if it succeeded, then crash reading
+      // res.imported - the user saw "Cannot read properties of undefined".
+      if (xhr.status >= 400 || !body) {
+        reject(new Error(errorMessage(body) || `Upload failed (${xhr.status || "no response"}). The file may be too large or the server stopped.`));
+      } else {
+        resolve(body);
       }
     };
     xhr.onerror = () => reject(new Error("Could not reach the server during upload."));

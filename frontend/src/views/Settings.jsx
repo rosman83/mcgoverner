@@ -23,11 +23,17 @@ function Field({ f, values, setValues }) {
       <label>{f.label}</label>
       <input
         type={isSecret ? "password" : "text"}
-        placeholder={isSecret && f.set ? "Enter a new key to replace it" : ""}
+        placeholder={isSecret && f.set ? "Enter a new key to replace it" : (f.options?.[0] ?? "")}
+        list={f.options ? `${f.name}-options` : undefined}
         value={values[f.name] ?? (isSecret ? "" : f.display) ?? ""}
         onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
         autoComplete="off"
       />
+      {f.options && (
+        <datalist id={`${f.name}-options`}>
+          {f.options.map((o) => <option key={o} value={o} />)}
+        </datalist>
+      )}
       {isSecret && (
         <div className={f.set ? "status-set" : "help muted"}>
           {f.set ? `Set (${f.display})` : "Not set"}

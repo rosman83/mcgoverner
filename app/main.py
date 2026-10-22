@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import shutil
 import signal
 import subprocess
 import threading
@@ -49,6 +50,7 @@ app = FastAPI(title="McGoverner")
 # .version file at the repo root; prefer that, and only fall back to git (for
 # local dev checkouts, which have no .version file) then "dev".
 from app.config import REPO_ROOT
+from app.llm.client import LLMError
 
 VERSION_FILE = os.path.join(REPO_ROOT, ".version")
 try:
@@ -63,54 +65,67 @@ except OSError:
     except Exception:
         APP_VERSION = "dev"
 
-_LATEST_VERSION_CACHE = {"sha": None, "checked_at": 0.0}
-LATEST_VERSION_CHECK_TTL = 600  # seconds
+_UPDATE_CACHE = {"behind_by": 0, "checked_at": 0.0}
+UPDATE_CHECK_TTL = 600  # seconds
 
 
-def _latest_main_sha():
-    """GitHub's HEAD commit for main, so the UI can flag "a fix has shipped,
-    relaunch to get it" - cached for 10 minutes regardless of how often this is
-    called. The navbar's usage poll already hits /api/usage every 60s; without
-    caching that alone would burn through GitHub's 60/hr unauthenticated rate
-    limit within the hour from a single open tab. A failed check (offline,
-    rate-limited, GitHub hiccup) just keeps the last known value - never worth
-    alarming the user over a network blip."""
+def _commits_behind_main():
+    """How many commits main has that the running build doesn't, so the UI can
+    flag "a fix has shipped, relaunch to get it". Cached for 10 minutes - the
+    navbar polls /api/usage every 60s, and GitHub allows 60 unauthenticated
+    calls/hr. A failed check keeps the last known value.
+
+    Uses GitHub's compare API rather than "latest sha != ours": a 404 means
+    APP_VERSION isn't a commit on GitHub at all (an unpushed dev commit, or the
+    file-blob hash older Mac launchers wrote into .version by mistake), and
+    that used to show "Update available" forever."""
     import time
+    import urllib.error
     import urllib.request
 
+    if APP_VERSION == "dev":
+        return 0
     now = time.time()
-    if now - _LATEST_VERSION_CACHE["checked_at"] < LATEST_VERSION_CHECK_TTL:
-        return _LATEST_VERSION_CACHE["sha"]
+    if now - _UPDATE_CACHE["checked_at"] < UPDATE_CHECK_TTL:
+        return _UPDATE_CACHE["behind_by"]
+    _UPDATE_CACHE["checked_at"] = now
     try:
         req = urllib.request.Request(
-            "https://api.github.com/repos/rosman83/mcgoverner/commits/main",
+            f"https://api.github.com/repos/rosman83/mcgoverner/compare/{APP_VERSION}...main?per_page=1",
             headers={"User-Agent": "McGoverner", "Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read())
-        _LATEST_VERSION_CACHE["sha"] = data["sha"][:7]
+            _UPDATE_CACHE["behind_by"] = json.loads(resp.read()).get("ahead_by", 0)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            _UPDATE_CACHE["behind_by"] = 0
     except Exception:
         pass
-    _LATEST_VERSION_CACHE["checked_at"] = now
-    return _LATEST_VERSION_CACHE["sha"]
+    return _UPDATE_CACHE["behind_by"]
 
 
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
-    """Every other route already turns expected failures into an HTTPException
-    with a real message - this only catches genuine bugs. Give the user
-    something they can screenshot and report instead of a bare 500, and put
-    the full traceback where it survives past the launcher's /tmp log."""
+    """Catches anything a route didn't turn into an HTTPException. AI failures
+    (LLMError) already carry a message the user can act on - show it as-is.
+    Anything else is a bug: give the user something they can screenshot and
+    report instead of a bare 500, and put the full traceback where it survives
+    past the launcher's /tmp log."""
     error_id = uuid.uuid4().hex[:8]
     error_logger.error(
         "[%s] %s %s\n%s", error_id, request.method, request.url.path,
         "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
     )
+    if isinstance(exc, LLMError):
+        status, message = 502, str(exc)
+    else:
+        status = 500
+        message = f"Something went wrong on the server's end ({type(exc).__name__}: {str(exc)[:200]})."
     return JSONResponse(
-        status_code=500,
+        status_code=status,
         content={
             "error": "server_error",
-            "message": "Something went wrong on the server's end.",
+            "message": message,
             "error_id": error_id,
             "log_hint": f"Details saved to {ERROR_LOG_PATH}",
         },
@@ -181,23 +196,41 @@ def api_lectures():
     return out
 
 
+UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "..", "lectures")
+
+
+def _save_upload(f):
+    """Stream an upload into lectures/ under a name nothing else is using.
+    Writing straight to lectures/<filename> overwrote an existing lecture's
+    source file on re-upload (image extraction reads it later), and the
+    duplicate check then deleted it outright."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    stem, ext = os.path.splitext(os.path.basename(f.filename or "upload"))
+    dest = os.path.join(UPLOAD_DIR, stem + ext)
+    n = 1
+    while os.path.exists(dest):
+        dest = os.path.join(UPLOAD_DIR, f"{stem} ({n}){ext}")
+        n += 1
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(f.file, out)
+    return dest
+
+
+# Plain `def`, not `async def`: parsing a big deck is slow, blocking work, and
+# in an async route it froze the whole server (every other request stalled).
 @app.post("/api/lectures/import")
-async def api_import_lectures(files: list[UploadFile] = File(...)):
+def api_import_lectures(files: list[UploadFile] = File(...)):
     imported = []
     errors = []
     duplicates = []
-    upload_dir = os.path.join(os.path.dirname(DB_PATH), "..", "lectures")
-    os.makedirs(upload_dir, exist_ok=True)
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
         if ext not in (".pdf", ".pptx"):
             errors.append(f"{f.filename}: unsupported (use .pdf or .pptx)")
             continue
-        dest = os.path.join(upload_dir, f.filename)
-        with open(dest, "wb") as out:
-            content = await f.read()
-            out.write(content)
+        dest = None
         try:
+            dest = _save_upload(f)
             # Detect duplicates before importing
             from app.ingest.duplicates import detect_duplicate_file
             dup = detect_duplicate_file(dest)
@@ -221,11 +254,13 @@ async def api_import_lectures(files: list[UploadFile] = File(...)):
             threading.Thread(target=_analyze_lecture, args=(lid,), daemon=True).start()
         except Exception as e:
             errors.append(f"{f.filename}: {e}")
+            if dest and os.path.exists(dest):
+                os.remove(dest)  # unreadable upload - don't leave it in lectures/
     return {"imported": imported, "errors": errors, "duplicates": duplicates}
 
 
 @app.post("/api/question_sets/import")
-async def api_import_question_set(
+def api_import_question_set(
     lecture_id: int = Form(...), files: list[UploadFile] = File(...)
 ):
     """Import a professor's practice-question handout as real questions attached to a
@@ -238,8 +273,6 @@ async def api_import_question_set(
     if not lec:
         raise HTTPException(404, "Lecture not found")
 
-    upload_dir = os.path.join(os.path.dirname(DB_PATH), "..", "lectures")
-    os.makedirs(upload_dir, exist_ok=True)
     imported = dupes = 0
     errors = []
     for f in files:
@@ -247,11 +280,8 @@ async def api_import_question_set(
         if ext not in (".pdf", ".pptx"):
             errors.append(f"{f.filename}: unsupported (use .pdf or .pptx)")
             continue
-        dest = os.path.join(upload_dir, f.filename)
-        with open(dest, "wb") as out:
-            out.write(await f.read())
         try:
-            res = import_question_set(dest, lecture_id)
+            res = import_question_set(_save_upload(f), lecture_id)
             imported += res["imported"]
             dupes += res["skipped_duplicates"]
         except Exception as e:
@@ -476,11 +506,8 @@ def api_summary(lid: int):
 
 @app.post("/api/lectures/{lid}/summary/generate")
 def api_generate_summary(lid: int):
-    try:
-        result = generate_summary(lid)
-        return {"status": "done", "key_points": len(result.get("key_points", []))}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    result = generate_summary(lid)
+    return {"status": "done", "key_points": len(result.get("key_points", []))}
 
 
 # ---------- Questions ----------
@@ -536,8 +563,7 @@ def api_usage():
     conn.close()
 
     provider, model = active_model()
-    latest = _latest_main_sha()
-    update_available = bool(latest and APP_VERSION != "dev" and latest != APP_VERSION)
+    behind = _commits_behind_main()
 
     def shape(r):
         prompt = r["prompt"]
@@ -554,8 +580,8 @@ def api_usage():
         "provider": provider,
         "model": model,
         "version": APP_VERSION,
-        "latest_version": latest,
-        "update_available": update_available,
+        "updates_behind": behind,
+        "update_available": behind > 0,
         "today": shape(row),
         "all_time": shape(total),
         "today_by_kind": [dict(r) for r in by_kind],
@@ -577,10 +603,7 @@ def api_generate_recommendations(sid: int, force: bool = False):
     """Analyse this session's mistakes into saved study guidance (one API call, cached
     in the database — regenerating only happens with force=true)."""
     from app.llm.recommendations import generate_recommendations
-    try:
-        rec = generate_recommendations(sid, force=force)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    rec = generate_recommendations(sid, force=force)
     if not rec:
         return {"recommendations": None, "message": "No mistakes in this session."}
     return {"recommendations": rec}

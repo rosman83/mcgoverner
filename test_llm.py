@@ -18,6 +18,9 @@ db.init_db()
 from app.llm import client as C
 from app.llm import captions as CAP
 from app.ingest import images as IMG
+from app import sessiongen as _S
+
+_REAL_GEN_QS = _S.generate_questions_for_slides  # several tests stub it out
 
 _REAL_GET_CLIENT = C.get_client  # stubs below replace it; some tests need the real one
 
@@ -883,6 +886,89 @@ def test_delete_session_keeps_answers_and_missed():
     assert counts["sessions"] == 0 and counts["session_questions"] == 0, counts
     # The point of the feature: clearing history must not erase learning history.
     assert counts["questions"] == 1 and counts["answers"] == 1 and counts["missed"] == 1, counts
+
+
+def test_transient_errors_retried_timeouts_not():
+    import httpx2 as httpx  # openai 3.x ships httpx2
+    import openai
+
+    req = httpx.Request("POST", "https://openrouter.ai")
+    real_time = C.time
+    C.time = type("T", (), {"sleep": staticmethod(lambda s: None)})
+    try:
+        seen = stub_chat([openai.APIConnectionError(request=req), '{"ok": 1}'])
+        assert C.chat_json("p") == {"ok": 1} and len(seen) == 2
+        seen = stub_chat([openai.APITimeoutError(request=req)])
+        try:
+            C.chat_json("p")
+            assert False, "should have raised"
+        except C.LLMError:
+            pass
+        assert len(seen) == 1, "a timeout may already be billed - must not retry"
+    finally:
+        C.time = real_time
+
+
+def test_empty_reply_is_retried():
+    # Gemini sometimes answers with null content (safety block / reasoning ate
+    # the budget) - that used to crash on None.strip() as a bare 500.
+    seen = stub_chat([None, '{"ok": 1}'])
+    assert C.chat_json("p") == {"ok": 1} and len(seen) == 2
+
+
+def test_model_setting_and_fallback():
+    for var in ("USE_DEEPSEEK_FOR_TEXT", "DEEPSEEK_API_KEY"):
+        os.environ.pop(var, None)
+    os.environ["OPENROUTER_MODEL"] = "openai/gpt-5.6-luna"
+    try:
+        seen = stub_chat(['{"ok": 1}'])
+        C.chat_json("p")
+    finally:
+        os.environ.pop("OPENROUTER_MODEL")
+    assert seen[0]["model"] == "openai/gpt-5.6-luna"
+    assert seen[0]["extra_body"]["models"] == ["openai/gpt-5.6-luna", C.BACKUP_MODEL]
+    assert C._openrouter_fallback(C.BACKUP_MODEL)["models"] == [C.BACKUP_MODEL, C.DEFAULT_MODEL]
+
+
+def test_all_batches_failing_raises_the_cause():
+    def boom(batch):
+        raise C.LLMError("account is out of credit")
+
+    real = _S._gen_batch
+    _S._gen_batch = boom
+    try:
+        _REAL_GEN_QS([{}] * 3)
+        assert False, "should have raised"
+    except C.LLMError as e:
+        assert "out of credit" in str(e)
+    finally:
+        _S._gen_batch = real
+
+
+def test_ai_errors_reach_the_user():
+    from fastapi.testclient import TestClient
+    import app.main as M
+
+    def boom(lid):
+        raise C.LLMError("account is out of credit")
+
+    real = M.generate_summary
+    M.generate_summary = boom
+    try:
+        r = TestClient(M.app, raise_server_exceptions=False).post("/api/lectures/1/summary/generate")
+    finally:
+        M.generate_summary = real
+    assert r.status_code == 502 and "out of credit" in r.json()["message"], r.text
+
+
+def test_reupload_never_overwrites_a_lecture_file():
+    import io
+    import app.main as M
+
+    M.UPLOAD_DIR = tempfile.mkdtemp()
+    upload = lambda: type("U", (), {"filename": "L1.pdf", "file": io.BytesIO(b"x")})()
+    first, second = M._save_upload(upload()), M._save_upload(upload())
+    assert first != second and os.path.basename(second) == "L1 (1).pdf", second
 
 
 if __name__ == "__main__":

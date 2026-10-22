@@ -7,8 +7,8 @@ text file: saving reads the current .env (if any), updates only the given keys,
 writes it back preserving untouched lines/comments, and applies the change to the
 running process immediately so no restart is needed.
 
-Everyone defaults to OpenRouter for everything (text + vision, one fixed model -
-see app/llm/client.py). DeepSeek is an advanced, opt-in, text-only override for
+Everyone defaults to OpenRouter for everything (text + vision, one model,
+pickable here - see app/llm/client.py). DeepSeek is an advanced, opt-in, text-only override for
 people who already have DeepSeek credit to use up.
 """
 import os
@@ -32,6 +32,9 @@ FIELDS = [
     ("OPENROUTER_API_KEY", "OpenRouter API key", "secret", False,
      "Required. Powers everything - questions, summaries, captions, and image "
      "descriptions. Get one at openrouter.ai/keys."),
+    ("OPENROUTER_MODEL", "Model", "text", False,
+     "Which OpenRouter model does everything. Leave blank for the default. If it's having "
+     "issues, pick another - and if a request fails, it automatically retries on a backup model."),
     ("USE_DEEPSEEK_FOR_TEXT", "Use DeepSeek for text generation", "bool", True,
      "Advanced. Uses your DeepSeek credit for questions/summaries/captions instead "
      "of OpenRouter. Image descriptions always use OpenRouter regardless - DeepSeek "
@@ -40,6 +43,11 @@ FIELDS = [
      "Required if the option above is on."),
 ]
 FIELD_NAMES = {name for name, *_ in FIELDS}
+
+
+def _field_options():
+    from app.llm.client import SUGGESTED_MODELS
+    return {"OPENROUTER_MODEL": SUGGESTED_MODELS}
 
 
 def is_configured():
@@ -54,6 +62,7 @@ def _mask(value):
 
 def current_config():
     """Field metadata + masked current values, for the settings page."""
+    options = _field_options()
     fields = [
         {
             "name": name,
@@ -64,6 +73,7 @@ def current_config():
             "set": bool(os.environ.get(name)),
             "value": ((os.environ.get(name) or "").lower() in TRUE_STRINGS) if ftype == "bool" else None,
             "display": (_mask(os.environ.get(name, "")) if ftype == "secret" else os.environ.get(name, "")),
+            "options": options.get(name),
         }
         for name, label, ftype, advanced, help_text in FIELDS
     ]
@@ -105,6 +115,23 @@ def validate_openrouter_key(key):
     return True, None
 
 
+def validate_openrouter_model(model):
+    """A typo'd model id would make every request fail, so check it against
+    OpenRouter's public model list. It must also read images - vision uses the
+    same model. Network trouble never blocks saving."""
+    try:
+        with urllib.request.urlopen("https://openrouter.ai/api/v1/models", timeout=10) as resp:
+            models = {m["id"]: m for m in json.loads(resp.read())["data"]}
+    except Exception:
+        return True, None
+    m = models.get(model)
+    if not m:
+        return False, f"OpenRouter has no model called \"{model}\" - check the spelling (e.g. google/gemini-3.7-flash)."
+    if "image" not in (m.get("architecture") or {}).get("input_modalities", []):
+        return False, f"{model} can't read images, which slide descriptions need. Pick a model that supports image input."
+    return True, None
+
+
 def save_config(updates):
     """Apply `updates` (name -> value; "" clears that key) to .env and the live
     process. Unknown keys are ignored. Existing lines/comments/ordering in .env
@@ -127,6 +154,11 @@ def save_config(updates):
 
     if updates.get("OPENROUTER_API_KEY"):
         ok, err = validate_openrouter_key(updates["OPENROUTER_API_KEY"])
+        if not ok:
+            return {**current_config(), "error": err}
+
+    if updates.get("OPENROUTER_MODEL"):
+        ok, err = validate_openrouter_model(updates["OPENROUTER_MODEL"])
         if not ok:
             return {**current_config(), "error": err}
 

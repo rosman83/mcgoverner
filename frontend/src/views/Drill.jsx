@@ -174,7 +174,7 @@ function Setup({ onStarted }) {
       fd.append("target", target);
       fd.append("time_mode", timeMode);
       if (!allLectures) for (const id of checked) fd.append("lecture_ids", id);
-      const res = await fetch("/api/sessions", { method: "POST", body: fd }).then((r) => r.json());
+      const res = await api.post("/api/sessions", fd);
       setStatus("");
       if (!res.question_count) {
         setStatus(res.message || "No questions available for this mode/source.");
