@@ -27,7 +27,7 @@ export function SessionRow({ s, onResume, onReview, onDelete }) {
           {s.status === "completed"
             ? onReview && <button className="btn ghost sm" onClick={() => onReview(s.id)}>Review</button>
             : onResume && <button className="btn sm" onClick={() => onResume(s.id)}>Resume</button>}
-          {onDelete && <button className="btn ghost sm" onClick={() => onDelete(s.id, s.title)}>Remove</button>}
+          {onDelete && <button className="btn ghost sm" onClick={() => { if (window.confirm(`Remove "${s.title}" from your history? Your answers and missed questions are kept.`)) onDelete(s.id, s.title); }}>Remove</button>}
         </div>
       </div>
     </li>

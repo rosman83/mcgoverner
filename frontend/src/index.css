@@ -594,3 +594,8 @@ input.tag-pill.tag-edit::-webkit-outer-spin-button { -webkit-appearance: none; m
   max-width: 480px; margin: 80px auto; text-align: center; padding: 0 20px;
 }
 .crash-screen p { margin: 10px 0 20px; }
+
+/* ---------- Session UI: non-color-only correctness marks ---------- */
+.option .mark { font-weight: 700; }
+.qnav-btn { position: relative; }
+.qnav-btn .qmark { position: absolute; top: -4px; right: -3px; font-size: 9px; line-height: 1; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 50%; width: 12px; height: 12px; display: grid; place-items: center; }

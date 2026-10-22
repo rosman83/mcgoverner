@@ -715,7 +715,7 @@ def api_create_session(
     from app.sessiongen import create_practice_session, create_review_session
     lids = lecture_ids if lecture_ids else ([lecture_id] if lecture_id else None)
     if mode == "review":
-        sid, count = create_review_session(lecture_ids=lids, time_mode=time_mode)
+        sid, count = create_review_session(lecture_ids=lids, time_mode=time_mode, target=target)
         reason = "Nothing to review yet — miss a question first and it lands here."
     else:
         sid, count, reason = create_practice_session(
@@ -898,17 +898,28 @@ def api_session_question(sid: int, question_id: int):
 
 
 @app.get("/api/sessions/{sid}/next")
-def api_next_question(sid: int):
+def api_next_question(sid: int, after: int = None):
     conn = get_conn()
     s = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
     if not s:
         conn.close()
         raise HTTPException(404, "Session not found")
-    row = conn.execute(
-        QUESTION_SELECT + "WHERE sq.session_id=? AND sq.answered=0 "
-        "ORDER BY sq.position LIMIT 1",
-        (sid,),
-    ).fetchone()
+    # `after`: the position being left, so "Next" on an unanswered question moves
+    # on to the following unanswered one (wrapping to the first) instead of
+    # reloading the same question.
+    row = None
+    if after is not None:
+        row = conn.execute(
+            QUESTION_SELECT + "WHERE sq.session_id=? AND sq.answered=0 AND sq.position>? "
+            "ORDER BY sq.position LIMIT 1",
+            (sid, after),
+        ).fetchone()
+    if row is None:
+        row = conn.execute(
+            QUESTION_SELECT + "WHERE sq.session_id=? AND sq.answered=0 "
+            "ORDER BY sq.position LIMIT 1",
+            (sid,),
+        ).fetchone()
     conn.close()
     if not row:
         return {"done": True}
@@ -975,6 +986,9 @@ def api_answer(sid: int, question_id: int, body: Answer):
         raise HTTPException(404, "Not in session")
     qid = row["question_id"]
     correct = body.selected_index == row["correct_index"]
+    # Tutor mode shows the answer right after submitting, so changing it
+    # afterwards would just erase a real miss from the review queue.
+    tutor = conn.execute("SELECT tutor_mode FROM sessions WHERE id=?", (sid,)).fetchone()["tutor_mode"]
 
     # Re-answering a question you already did (fixing a misclick) updates the existing
     # row rather than stacking a second one, so accuracy reflects your latest answer
@@ -983,6 +997,9 @@ def api_answer(sid: int, question_id: int, body: Answer):
         "SELECT id FROM answers WHERE session_id=? AND question_id=? ORDER BY id DESC LIMIT 1",
         (sid, qid),
     ).fetchone()
+    if prior and tutor:
+        conn.close()
+        raise HTTPException(409, "Already answered - answers are final in tutor mode.")
     if prior:
         conn.execute(
             "UPDATE answers SET correct=?, selected_index=?, answered_at=datetime('now') "

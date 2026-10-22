@@ -546,6 +546,11 @@ def test_changing_an_answer_recalculates():
     import app.main as M
 
     _seed_two_question_session()
+    # Revision is a quiz-mode feature; tutor mode answers are final (409).
+    conn = db.get_conn()
+    conn.execute("UPDATE sessions SET tutor_mode=0 WHERE id=1")
+    conn.commit()
+    conn.close()
     c = TestClient(M.app)
 
     wrong = c.post("/api/sessions/1/answer/1", json={"selected_index": 0}).json()
