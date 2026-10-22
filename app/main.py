@@ -2,7 +2,6 @@ import logging
 import os
 import json
 import shutil
-import signal
 import subprocess
 import threading
 import traceback
@@ -22,20 +21,38 @@ from app.db import init_db, get_conn, DB_PATH
 # written to a log file that survives the launcher's /tmp log being cleared
 # (data/ is the same persistent dir the database lives in).
 ERROR_LOG_PATH = os.path.join(os.path.dirname(DB_PATH), "error.log")
-logging.basicConfig(
-    filename=ERROR_LOG_PATH,
-    level=logging.ERROR,
-    format="%(asctime)s %(message)s",
-)
+from logging.handlers import RotatingFileHandler
+
+_handler = RotatingFileHandler(ERROR_LOG_PATH, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+logging.basicConfig(level=logging.ERROR, handlers=[_handler])
 error_logger = logging.getLogger("mcgoverner.errors")
-from app.ingest.slides import import_lecture, list_lectures, slugify
-from app.ingest.concepts import chunk_lecture, coverage_stats
+from app.ingest.slides import import_lecture, list_lectures
+from app.ingest.concepts import coverage_stats
 from app.llm.summaries import generate_summary, get_summary
-import app.scheduler as sched
 
 init_db()
 
 app = FastAPI(title="McGoverner")
+
+# Local-app hardening: any website you visit can fire cross-site POSTs at
+# localhost:8000 (spend API credit, quit the app), and DNS rebinding can make
+# the browser treat a hostile name as same-origin. Reject foreign Origins on
+# state-changing requests and unknown Host headers.
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+_LOCAL_ORIGINS = {"http://localhost:8000", "http://127.0.0.1:8000"}
+
+
+@app.middleware("http")
+async def reject_foreign_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and origin not in _LOCAL_ORIGINS:
+        return JSONResponse(status_code=403, content={"message": "Blocked: request came from another website."})
+    return await call_next(request)
+
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
 
 
 # Short commit hash of the running code, so the navbar can show it and someone
@@ -156,24 +173,11 @@ def index():
 # ---------- Lifecycle ----------
 @app.post("/api/quit")
 def api_quit():
-    """The Mac launcher runs as a script wrapped in an AppleScript app with no
-    Dock/menu-bar quit affordance most users will find, so it's easy to end up
-    with the server stuck running in the background with no visible way to
-    stop it. Give the UI itself a kill switch: free port 8000 outright rather
-    than trying to gracefully stop just this process, since --reload runs a
-    supervisor process that can otherwise just restart what we kill.
-    ponytail: lsof/kill is POSIX-only. Windows's launcher runs in a visible
-    console window that already stops the process tree on close, so it hasn't
-    hit this complaint - add a taskkill path here if that changes.
-    """
-    def _die():
-        try:
-            out = subprocess.run(["lsof", "-ti", "tcp:8000"], capture_output=True, text=True).stdout
-            for pid in out.split():
-                os.kill(int(pid), signal.SIGKILL)
-        except Exception:
-            pass
-    threading.Timer(0.3, _die).start()
+    """The Mac launcher is an AppleScript app with no Dock/menu-bar quit most
+    users will find, so the UI gets its own kill switch. Exit this process
+    after the response has gone out - there is no --reload supervisor to
+    respawn it, and os._exit works the same on Mac and Windows."""
+    threading.Timer(0.3, os._exit, args=(0,)).start()
     return {"ok": True}
 
 
@@ -367,18 +371,14 @@ def api_lecture_slides(lid: int):
 @app.get("/api/lectures/{lid}/deck")
 def api_lecture_deck(lid: int):
     """Slides with their text AND images, for the inline slide-by-slide view."""
-    from app.ingest.images import images_for_slides
+    from app.ingest.images import images_by_slide
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM slides WHERE lecture_id=? ORDER BY slide_num", (lid,)
     ).fetchall()
     conn.close()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["images"] = images_for_slides([d["id"]])
-        out.append(d)
-    return out
+    imgs = images_by_slide([r["id"] for r in rows])
+    return [{**dict(r), "images": imgs.get(r["id"], [])} for r in rows]
 
 
 @app.get("/api/lectures/{lid}/slide/{num}")
@@ -818,12 +818,13 @@ def api_session_review(sid: int):
         (sid, sid),
     ).fetchall()
     conn.close()
-    from app.ingest.images import images_for_slides
+    from app.ingest.images import images_by_slide
+    imgs = images_by_slide([r["slide_id"] for r in rows])
     out = []
     for r in rows:
         d = dict(r)
         d["options"] = json.loads(d["options"])
-        d["source_images"] = images_for_slides([d["slide_id"]]) if d.get("slide_id") else []
+        d["source_images"] = imgs.get(d["slide_id"], [])
         out.append(d)
     return {"session": dict(s), "questions": out}
 

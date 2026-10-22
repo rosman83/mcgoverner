@@ -27,7 +27,7 @@ export function UpdateAlert({ usage }) {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>A new version is out</div>
           <div className="muted" style={{ fontSize: 13 }}>
             You're on build {usage.version}, {usage.updates_behind} update{usage.updates_behind === 1 ? "" : "s"} behind.
-            Close this window and relaunch McGoverner to update.
+            Click Quit (power icon) in the top bar, then reopen McGoverner.
           </div>
         </div>
       )}

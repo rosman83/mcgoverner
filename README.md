@@ -26,7 +26,7 @@ own text + OCR + caption, so redundancy in questions simply mirrors the source s
 2. **Drill** — start a session (tutor or quiz mode, UWorld-style MCQs with teaching explanations).
 3. **Review** — do "due reviews" (missed questions).
 
-Sessions are dynamic: set your own target, pause/resume anytime, answers update the scheduler.
+Sessions are dynamic: set your own target, pause/resume anytime, wrong answers are tagged for review.
 
 ## Answering
 
@@ -44,12 +44,7 @@ progress count all reflect your latest answer.
 
 ```bash
 .venv/bin/python test_llm.py     # API client, generation, sessions, schema (no network)
-
-# UI state machine, driving the real app.js in jsdom against a throwaway database:
-npm i jsdom
-BLOCK1_DB=/tmp/ui.db .venv/bin/python seed_ui_db.py
-BLOCK1_DB=/tmp/ui.db ./run.sh &
-node test_ui.js
+.venv/bin/python test_platform.py # origin/host guard, projection cache, image batching
 ```
 
 `BLOCK1_DB` points the app at a different database — always set it when testing so your
@@ -70,8 +65,8 @@ copied out of Canvas lands clean.
 
 Left of the name is a course-strand pill: **foundations** (blue, the default for every
 import), **doctoring** (green), **anatomy** (amber). Changing it saves right away.
-Add strands in `LECTURE_TAGS` (`main.py`, and the matching list in `app.js` + colors in
-`style.css`).
+Add strands in `LECTURE_TAGS` (`main.py`, and the matching list in `frontend/src/views/Learn.jsx` + colors in
+`frontend/src/index.css`).
 
 Next to it is a **Week** pill — type the week the lecture was given (1–52) and it saves
 on Enter or blur; clear the box to untag. Weeks are stored on the lecture, so they are
@@ -202,9 +197,8 @@ app/
     summaries.py   condensed lecture summaries
     captions.py    batched image captions from OCR text
   sessiongen.py    slide-anchored MCQ generation (the question engine)
-  scheduler.py     spaced repetition (SM-2 variant)
   main.py          FastAPI app + routes
-  static/          frontend (vanilla JS, no build step)
+  static/dist/     built React frontend (source in frontend/, built with `npm run build`)
 lectures/          imported source files
 data/block1.db     local database
 ```

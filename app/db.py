@@ -191,11 +191,23 @@ def get_conn(db_path=None):
 SCHEMA_VERSION = 17
 
 
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_questions_slide ON questions(slide_id);
+CREATE INDEX IF NOT EXISTS idx_questions_lecture ON questions(lecture_id);
+CREATE INDEX IF NOT EXISTS idx_answers_question ON answers(question_id);
+CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
+CREATE INDEX IF NOT EXISTS idx_slides_lecture ON slides(lecture_id);
+CREATE INDEX IF NOT EXISTS idx_slide_images_slide ON slide_images(slide_id);
+CREATE INDEX IF NOT EXISTS idx_missed_question ON missed(question_id);
+"""
+
+
 def init_db():
     conn = get_conn()
     conn.executescript(SCHEMA)
     conn.commit()
     _migrate(conn)
+    conn.executescript(INDEXES)  # after _migrate: some columns are added by it
     _shuffle_unanswered_options(conn)
     conn.close()
 
