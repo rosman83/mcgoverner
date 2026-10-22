@@ -8,8 +8,7 @@ writes it back preserving untouched lines/comments, and applies the change to th
 running process immediately so no restart is needed.
 
 Everyone defaults to OpenRouter for everything (text + vision, one model,
-pickable here - see app/llm/client.py). DeepSeek is an advanced, opt-in, text-only override for
-people who already have DeepSeek credit to use up.
+pickable here - see app/llm/client.py).
 """
 import os
 import json
@@ -20,7 +19,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
 
 # OpenRouter is always required - it's the default for everything, and vision
-# always uses it even when DeepSeek is handling text.
+# always uses it.
 REQUIRED = ("OPENROUTER_API_KEY",)
 
 TRUE_STRINGS = ("1", "true", "yes")
@@ -35,12 +34,6 @@ FIELDS = [
     ("OPENROUTER_MODEL", "Model", "text", False,
      "Which OpenRouter model does everything. Leave blank for the default. If it's having "
      "issues, pick another - and if a request fails, it automatically retries on a backup model."),
-    ("USE_DEEPSEEK_FOR_TEXT", "Use DeepSeek for text generation", "bool", True,
-     "Advanced. Uses your DeepSeek credit for questions/summaries/captions instead "
-     "of OpenRouter. Image descriptions always use OpenRouter regardless - DeepSeek "
-     "has no vision model."),
-    ("DEEPSEEK_API_KEY", "DeepSeek API key", "secret", True,
-     "Required if the option above is on."),
 ]
 FIELD_NAMES = {name for name, *_ in FIELDS}
 
@@ -138,8 +131,7 @@ def save_config(updates):
     are preserved; new keys are appended.
 
     Validates the RESULTING state before writing anything, so a rejected save
-    never partially applies: OpenRouter must end up set, and if "use DeepSeek
-    for text" ends up on, a DeepSeek key must be set too."""
+    never partially applies: OpenRouter must end up set."""
     updates = {k: (v or "").strip() for k, v in updates.items() if k in FIELD_NAMES}
 
     def resulting(key):
@@ -147,10 +139,6 @@ def save_config(updates):
 
     if not resulting("OPENROUTER_API_KEY"):
         return {**current_config(), "error": "An OpenRouter API key is required."}
-
-    use_deepseek = resulting("USE_DEEPSEEK_FOR_TEXT").lower() in TRUE_STRINGS
-    if use_deepseek and not resulting("DEEPSEEK_API_KEY"):
-        return {**current_config(), "error": "\"Use DeepSeek for text\" needs a DeepSeek API key too."}
 
     if updates.get("OPENROUTER_API_KEY"):
         ok, err = validate_openrouter_key(updates["OPENROUTER_API_KEY"])
@@ -192,35 +180,3 @@ def save_config(updates):
 
     return current_config()
 
-
-def _migrate_legacy_dual_key_users():
-    """Before this version, having both keys set meant DeepSeek was used for
-    text by default (the old provider-picking logic checked DEEPSEEK_API_KEY
-    first). Preserve that behavior for anyone who already had both keys set,
-    instead of silently switching their default text model out from under
-    them. Only ever fires once - after this, USE_DEEPSEEK_FOR_TEXT is always
-    explicitly set one way or the other, so the condition never matches again."""
-    if (
-        "USE_DEEPSEEK_FOR_TEXT" not in os.environ
-        and os.environ.get("DEEPSEEK_API_KEY")
-        and os.environ.get("OPENROUTER_API_KEY")
-    ):
-        seen = set()
-        out = []
-        for line in _read_env_lines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key == "USE_DEEPSEEK_FOR_TEXT":
-                    seen.add(key)
-                    out.append("USE_DEEPSEEK_FOR_TEXT=true")
-                    continue
-            out.append(line)
-        if "USE_DEEPSEEK_FOR_TEXT" not in seen:
-            out.append("USE_DEEPSEEK_FOR_TEXT=true")
-        with open(ENV_PATH, "w") as f:
-            f.write("\n".join(out) + ("\n" if out else ""))
-        os.environ["USE_DEEPSEEK_FOR_TEXT"] = "true"
-
-
-_migrate_legacy_dual_key_users()

@@ -3,7 +3,7 @@
 Sessions never draw from a pre-banked question pool. When a practice session is
 created we:
   1. Select slides from the chosen lectures (or all lectures).
-  2. Generate a fresh question per slide via DeepSeek (capped at MAX_QUESTIONS).
+  2. Generate a fresh question per slide via OpenRouter (capped at MAX_QUESTIONS).
   3. Record each question's coordinate (lecture_id, slide_id) and store it.
 Answering tags wrong questions into the `missed` table for next-day review.
 
@@ -81,7 +81,7 @@ E. Increased renal calcium reabsorption
 BATCH_SIZE = 8  # slides per API call in batched generation
 
 # Everything above {slides} is byte-identical across batches, so providers with prompt
-# caching (DeepSeek direct, or whatever OpenRouter routes to) bill this ~900-token
+# caching (whatever OpenRouter routes to) bill this ~900-token
 # prefix at the cache rate after the first call. Keep the variable slide text LAST —
 # any variable text placed earlier voids the cache for everything after it.
 QUESTION_BATCH_PROMPT = """Write NBME/USMLE-style single-best-answer questions for a medical student.

@@ -42,9 +42,8 @@ fi
 [ -d .venv ] || uv venv .venv --python 3.12 --quiet
 uv pip install --python .venv/bin/python --quiet -r requirements.txt
 
-if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
-  echo "WARNING: no LLM key set. Add DEEPSEEK_API_KEY or OPENROUTER_API_KEY to .env."
-  echo "         Pick the provider with LLM_PROVIDER=deepseek|openrouter (default: whichever key is set)."
+if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+  echo "WARNING: no API key set. Add OPENROUTER_API_KEY in the app's Settings page or in .env."
 fi
 
 # No --reload: that's a dev-only flag that restarts the whole server on any

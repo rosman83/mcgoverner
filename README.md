@@ -198,7 +198,7 @@ app/
     questionsets.py professor question handouts → questions (bypasses slides)
     concepts.py    slide coverage stats
   llm/
-    client.py      OpenRouter client (DeepSeek direct as an advanced opt-in for text)
+    client.py      OpenRouter client
     summaries.py   condensed lecture summaries
     captions.py    batched image captions from OCR text
   sessiongen.py    slide-anchored MCQ generation (the question engine)
@@ -219,11 +219,6 @@ real validation against OpenRouter's key-info endpoint on save (catches a bad
 key or a provisioning/management key pasted by mistake immediately, rather
 than failing confusingly on the first real generation call).
 
-**Advanced, optional:** if you already have DeepSeek credit, set
-`USE_DEEPSEEK_FOR_TEXT=true` plus `DEEPSEEK_API_KEY` (both required together)
-to use DeepSeek direct for text generation instead of OpenRouter. Image
-descriptions always go through OpenRouter regardless — DeepSeek has no vision
-model. This lives under "Advanced" on the Settings page, not the main flow.
 `run.sh`/`run.ps1` auto-load `.env`; you can also `export` the vars manually.
 
 ## Token usage
@@ -232,6 +227,6 @@ The header chip shows the active model and today's token spend; hover it for a
 per-task breakdown (questions / summaries / captions) and cache-hit rate. Raw rows
 live in the `api_usage` table, and `/api/usage` returns the same data as JSON.
 
-Prompts are ordered static-first so provider prompt caching (DeepSeek direct, or
-whatever OpenRouter routes to) bills the repeated ~900-token instruction prefix at
+Prompts are ordered static-first so provider prompt caching (whatever
+OpenRouter routes to) bills the repeated ~900-token instruction prefix at
 the cache rate. Keep variable text (slide bodies) at the END of any prompt you add.

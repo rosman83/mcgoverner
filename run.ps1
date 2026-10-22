@@ -177,7 +177,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "uv pip install failed (exit $LASTEXITCODE) - see the output above for which package."
 }
 
-if (-not $env:DEEPSEEK_API_KEY -and -not $env:OPENROUTER_API_KEY) {
+if (-not $env:OPENROUTER_API_KEY) {
     # Not PROGRESS: the Settings page handles this in-browser now, so there is
     # nothing to act on here - this is a note for someone reading the raw log,
     # not an instruction for the person watching the launcher window.

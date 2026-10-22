@@ -27,12 +27,6 @@ SUGGESTED_MODELS = [
     "google/gemini-3.8-flash",
 ]
 
-# Advanced, opt-in, TEXT-ONLY override for people who already have DeepSeek
-# credit to use up (see app/config.py for the toggle + migration). Vision
-# always goes through OpenRouter regardless - DeepSeek has no vision model.
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
-
 MAX_OCR_CHARS_FOR_PROMPT = 1200
 
 
@@ -49,11 +43,6 @@ def cap_for_prompt(text, max_chars=MAX_OCR_CHARS_FOR_PROMPT):
     return text[:max_chars] + "\n[...OCR text truncated, slide had unusually dense image text...]"
 
 
-def _use_deepseek_for_text():
-    enabled = (os.environ.get("USE_DEEPSEEK_FOR_TEXT") or "").strip().lower() in ("1", "true", "yes")
-    return enabled and bool(os.environ.get("DEEPSEEK_API_KEY"))
-
-
 def openrouter_model():
     return (os.environ.get("OPENROUTER_MODEL") or "").strip() or DEFAULT_MODEL
 
@@ -66,24 +55,16 @@ def _openrouter_fallback(model):
 
 
 def active_model():
-    if _use_deepseek_for_text():
-        return "deepseek", DEEPSEEK_MODEL
     return "openrouter", openrouter_model()
 
 
 def get_client():
-    if _use_deepseek_for_text():
-        # _use_deepseek_for_text() already requires DEEPSEEK_API_KEY to be set
-        # to return True, so it's guaranteed present here.
-        api_key = os.environ.get("DEEPSEEK_API_KEY")
-        base_url = DEEPSEEK_BASE_URL
-    else:
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "OPENROUTER_API_KEY not set. Add it in Settings — get one at openrouter.ai/keys."
-            )
-        base_url = OPENROUTER_BASE_URL
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY not set. Add it in Settings — get one at openrouter.ai/keys."
+        )
+    base_url = OPENROUTER_BASE_URL
     # max_retries=0: _complete() owns retry policy (the SDK's would also retry
     # timeouts, which can bill twice for one answer).
     return OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=180)
@@ -99,7 +80,6 @@ def _record_usage(resp, kind, provider_name=None, model_name=None):
         details = getattr(u, "prompt_tokens_details", None)
         if details is not None:
             cached = getattr(details, "cached_tokens", 0) or 0
-        # DeepSeek reports cache hits on the usage object directly.
         cached = cached or getattr(u, "prompt_cache_hit_tokens", 0) or 0
         from app.db import get_conn
 
@@ -143,7 +123,7 @@ def _friendly_api_error(e):
         msg = "The API key was rejected (401). It may be invalid, revoked, or the wrong kind of key - check it in Settings."
     elif status == 402 or "credit" in detail.lower() or "insufficient" in detail.lower():
         msg = ("The API request was rejected for billing (402) - the account is likely out of credit. "
-               "Add more at openrouter.ai (or platform.deepseek.com) and try again.")
+               "Add more at openrouter.ai and try again.")
     elif status == 429:
         msg = "The AI provider is rate-limiting requests right now. Wait a minute and try again."
     elif status and status >= 500:
@@ -160,7 +140,11 @@ def _friendly_api_error(e):
 _TRANSIENT = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
 
 
-def _complete(client, kind, provider_name, **kwargs):
+class LLMTruncated(LLMError):
+    """Reply hit max_tokens. Resending the same request would just truncate again."""
+
+
+def _complete(client, kind, provider_name, fail_on_length=False, **kwargs):
     """One chat completion with retries on transient failures. Returns the
     reply text, "" if the model sent back nothing (chat_json retries that)."""
     for attempt in range(3):
@@ -181,6 +165,8 @@ def _complete(client, kind, provider_name, **kwargs):
     # (e.g. a safety block, or reasoning that ate the whole token budget).
     if not resp.choices:
         return ""
+    if fail_on_length and getattr(resp.choices[0], "finish_reason", None) == "length":
+        raise LLMTruncated("The AI's reply was cut off before it finished.")
     return (resp.choices[0].message.content or "").strip()
 
 
@@ -201,7 +187,7 @@ def chat(prompt, system=None, temperature=0.7, max_tokens=2000, json_mode=False,
         kwargs["response_format"] = {"type": "json_object"}
     if provider == "openrouter":
         kwargs["extra_body"] = _openrouter_fallback(model)
-    return _complete(client, kind, provider, **kwargs)
+    return _complete(client, kind, provider, fail_on_length=json_mode, **kwargs)
 
 
 def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, kind=None):
@@ -212,7 +198,7 @@ def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, 
     Only malformed output is retried — an auth/quota/bad-request error will fail
     the same way three times, so it is raised immediately.
     """
-    # The literal lowercase "json" is required: DeepSeek (like OpenAI) rejects
+    # The literal lowercase "json" is required: some providers reject
     # response_format=json_object unless the word appears in the messages, and this
     # path now sets that format on every call.
     sys = (system or "") + (
@@ -223,13 +209,23 @@ def chat_json(prompt, system=None, temperature=0.7, max_tokens=4000, retries=2, 
         "instead, e.g. \"ΔP = Q × R\" and \"P_ip\" or \"P(ip)\" for subscripts."
     )
     last_err = None
+    bumped = False
     for _ in range(retries + 1):
         # API-level failures raise straight out of chat(): retrying the same
         # request here cannot fix them (chat already retried transient ones).
-        raw = chat(
-            prompt, system=sys, temperature=temperature,
-            max_tokens=max_tokens, json_mode=True, kind=kind,
-        )
+        try:
+            raw = chat(
+                prompt, system=sys, temperature=temperature,
+                max_tokens=max_tokens, json_mode=True, kind=kind,
+            )
+        except LLMTruncated:
+            # Cut off at max_tokens: an identical resend truncates again. Retry
+            # once with a bigger budget, then give up rather than pay 3x.
+            if bumped:
+                raise LLMError("The AI's reply was too long to finish. Try fewer slides or a different model in Settings.")
+            bumped = True
+            max_tokens = min(max_tokens * 2, 16000)
+            continue
         try:
             return _parse_json(raw)
         except (ValueError, TypeError) as e:

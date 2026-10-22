@@ -146,32 +146,61 @@ def test_usage_is_recorded():
     assert row["cached_tokens"] == 90
 
 
-def test_provider_switch():
-    for var in ("USE_DEEPSEEK_FOR_TEXT", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):
-        os.environ.pop(var, None)
-
-    # Default for everyone: OpenRouter with the one fixed model. Computing
-    # this doesn't need a key present, only calling it does.
+def test_openrouter_is_the_only_provider():
+    os.environ.pop("OPENROUTER_API_KEY", None)
+    os.environ.pop("OPENROUTER_MODEL", None)
     assert C.active_model() == ("openrouter", C.DEFAULT_MODEL)
-
-    # DeepSeek only kicks in with BOTH the toggle AND the key - either alone
-    # still means OpenRouter.
-    os.environ["DEEPSEEK_API_KEY"] = "x"
-    assert C.active_model() == ("openrouter", C.DEFAULT_MODEL)
+    # Stale DeepSeek settings from an old .env are ignored, never used.
     os.environ["USE_DEEPSEEK_FOR_TEXT"] = "true"
-    assert C.active_model() == ("deepseek", C.DEEPSEEK_MODEL)
-    del os.environ["DEEPSEEK_API_KEY"]
-    assert C.active_model() == ("openrouter", C.DEFAULT_MODEL), \
-        "toggle on but no key must fall back to openrouter, not crash"
+    os.environ["DEEPSEEK_API_KEY"] = "x"
+    try:
+        assert C.active_model() == ("openrouter", C.DEFAULT_MODEL)
+        C.get_client = _REAL_GET_CLIENT
+        try:
+            C.get_client()
+            assert False, "no OpenRouter key must not fall back to a stale DeepSeek key"
+        except RuntimeError as e:
+            assert "OPENROUTER_API_KEY" in str(e)
+    finally:
+        for v in ("USE_DEEPSEEK_FOR_TEXT", "DEEPSEEK_API_KEY"):
+            os.environ.pop(v, None)
 
-    os.environ.pop("USE_DEEPSEEK_FOR_TEXT", None)
+
+def test_truncated_reply_retried_once_with_more_tokens():
+    class _R(_Resp):
+        def __init__(self, content):
+            super().__init__(content)
+            self.choices[0].finish_reason = "length"
+
+    seen = []
+    replies = iter([_R('{"a'), '{"ok": 1}'])
+
+    class _Completions:
+        def create(self, **kw):
+            seen.append(kw)
+            r = next(replies)
+            return r if isinstance(r, _R) else _Resp(r)
+
+    class _Client:
+        chat = type("X", (), {"completions": _Completions()})()
+
+    C.get_client = lambda: _Client()
+    assert C.chat_json("p", max_tokens=1000) == {"ok": 1}
+    assert [k["max_tokens"] for k in seen] == [1000, 2000]
+
+    seen.clear()
+    replies = iter([_R("{"), _R("{")])
+    try:
+        C.chat_json("p", max_tokens=1000)
+        assert False, "should have raised"
+    except C.LLMError:
+        pass
+    assert len(seen) == 2, "truncation must not be retried more than once"
 
 
 def test_missing_key_names_the_right_var():
     C.get_client = _REAL_GET_CLIENT
     os.environ.pop("OPENROUTER_API_KEY", None)
-    os.environ.pop("USE_DEEPSEEK_FOR_TEXT", None)
-    os.environ.pop("DEEPSEEK_API_KEY", None)
     try:
         C.get_client()
         assert False, "should have raised"
@@ -917,8 +946,6 @@ def test_empty_reply_is_retried():
 
 
 def test_model_setting_and_fallback():
-    for var in ("USE_DEEPSEEK_FOR_TEXT", "DEEPSEEK_API_KEY"):
-        os.environ.pop(var, None)
     os.environ["OPENROUTER_MODEL"] = "openai/gpt-5.6-luna"
     try:
         seen = stub_chat(['{"ok": 1}'])
