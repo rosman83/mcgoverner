@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { weekText, weekLabel, weekCompare } from "../lib/format";
+import { weekText, weekLabel, weekCompare, tagLabel } from "../lib/format";
 import { Pills } from "../components/Pills";
 import { onLecturesChanged, notifySessionsChanged } from "../lib/events";
 
@@ -11,12 +11,6 @@ const MODE_OPTIONS = [
 const TIME_OPTIONS = [
   { value: "tutor", label: "Tutor mode" },
   { value: "quiz", label: "Quiz mode" },
-];
-const TAG_OPTIONS = [
-  { value: "", label: "All" },
-  { value: "foundations", label: "Foundations" },
-  { value: "doctoring", label: "Doctoring" },
-  { value: "anatomy", label: "Anatomy" },
 ];
 
 function fmtClock(totalSeconds) {
@@ -143,6 +137,14 @@ function Setup({ onStarted }) {
     [lectures]
   );
 
+  const tagOptions = useMemo(
+    () => [
+      { value: "", label: "All" },
+      ...[...new Set(lectures.map((l) => l.tag).filter(Boolean))].sort().map((t) => ({ value: t, label: tagLabel(t) })),
+    ],
+    [lectures]
+  );
+
   function toggleLecture(id) {
     setChecked((c) => {
       const next = new Set(c);
@@ -212,7 +214,7 @@ function Setup({ onStarted }) {
                 <option value="">Filter by week…</option>
                 {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
               </select>
-              <Pills options={TAG_OPTIONS} value={tagFilter} onChange={onTagFilter} />
+              <Pills options={tagOptions} value={tagFilter} onChange={onTagFilter} />
             </div>
           )}
           {!allLectures && (

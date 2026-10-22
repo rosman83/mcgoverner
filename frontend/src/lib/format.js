@@ -25,3 +25,11 @@ export function weekLabel(w) {
 export function weekCompare(a, b) {
   return weekText(a).localeCompare(weekText(b), undefined, { numeric: true, sensitivity: "base" });
 }
+
+// Course strand is a free-text label. The three original strands keep their
+// capitalised names; anything else is shown exactly as typed.
+const KNOWN_TAGS = { foundations: "Foundations", doctoring: "Doctoring", anatomy: "Anatomy" };
+export function tagLabel(t) {
+  const v = (t ?? "").toString().trim() || "foundations";
+  return KNOWN_TAGS[v] || v;
+}

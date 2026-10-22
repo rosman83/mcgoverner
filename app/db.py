@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS lectures (
     created_at TEXT DEFAULT (datetime('now')),
     summary_status TEXT DEFAULT 'not_started',
     ocr_status TEXT DEFAULT 'not_run',
-    tag TEXT DEFAULT 'foundations',     -- course strand: foundations | doctoring | anatomy
+    tag TEXT DEFAULT 'foundations',     -- free-text course strand label (default 'foundations')
     week INTEGER,                       -- course week the lecture was given (NULL = untagged)
     analysis_error TEXT DEFAULT ''      -- why the last OCR/caption/summary run failed ('' = fine)
 );

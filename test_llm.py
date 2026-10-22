@@ -456,7 +456,10 @@ def test_lecture_rename_and_retag():
     # Retagging must not disturb the name.
     assert r.json()["title"] == "Week 3 — Cardiac Physiology"
 
-    assert c.patch("/api/lectures/1", json={"tag": "pathology"}).status_code == 400
+    # Free text now: any label is accepted, whitespace collapsed, blank resets.
+    assert c.patch("/api/lectures/1", json={"tag": " Path  Labs "}).json()["tag"] == "Path Labs"
+    assert c.patch("/api/lectures/1", json={"tag": ""}).json()["tag"] == "foundations"
+    c.patch("/api/lectures/1", json={"tag": "anatomy"})
     assert c.patch("/api/lectures/1", json={"title": "   "}).status_code == 400
     assert c.patch("/api/lectures/1", json={}).status_code == 400
     assert c.patch("/api/lectures/999", json={"tag": "anatomy"}).status_code == 404

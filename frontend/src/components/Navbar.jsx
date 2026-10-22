@@ -1,6 +1,6 @@
 import { Pills } from "./Pills";
 import { UsagePopover, UpdateAlert } from "./UsagePopover";
-import { GearIcon, SunIcon, MoonIcon, HatIcon, PowerIcon } from "./icons";
+import { GearIcon, SunIcon, MoonIcon, PowerIcon } from "./icons";
 import { useTheme } from "../lib/useTheme";
 import { quitApp } from "../lib/api";
 
@@ -11,16 +11,14 @@ const VIEWS = [
   { value: "review", label: "Review" },
 ];
 
-// The cowboy hat from the landing page is the one bit of brand identity kept
-// here, as a small logo mark - everything else is still just the pill
-// switcher, no logo text.
+// Brand mark: a small bold wordmark with the cowboy hat emoji.
 export function Navbar({ view, setView, usage }) {
   const { isDark, toggle } = useTheme();
   return (
     <header className="topbar">
       <div className="topbar-inner">
         <div className="topbar-side">
-          <HatIcon />
+          <span className="brand">🤠 MCGOVERNER</span>
         </div>
         <Pills options={VIEWS} value={view} onChange={setView} />
         <div className="topbar-side topbar-icons">

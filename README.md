@@ -63,10 +63,10 @@ In **Learn**, click a lecture's name to edit it in place — Enter or clicking a
 immediately, Escape cancels. Pasted names are flattened to a single line, so a title
 copied out of Canvas lands clean.
 
-Left of the name is a course-strand pill: **foundations** (blue, the default for every
-import), **doctoring** (green), **anatomy** (amber). Changing it saves right away.
-Add strands in `LECTURE_TAGS` (`main.py`, and the matching list in `frontend/src/views/Learn.jsx` + colors in
-`frontend/src/index.css`).
+Left of the name is a course-strand pill (default **foundations**). Click it and type any
+label you like — "Anatomy", "Path", "Labs"; it suggests the ones already in use and saves
+on Enter or blur. Clearing it resets to foundations. Drill's strand filter is built from
+whatever labels your lectures use.
 
 Next to it is a **Week** pill — type any label for the lecture (a number, a letter, or a
 name like "Midterm review") and it saves on Enter or blur; clear the box to untag. Bare

@@ -296,7 +296,8 @@ def api_import_question_set(
     return {"imported": imported, "skipped_duplicates": dupes, "errors": errors}
 
 
-LECTURE_TAGS = ("foundations", "doctoring", "anatomy")
+DEFAULT_TAG = "foundations"
+MAX_TAG_LEN = 40
 
 
 MAX_WEEK_LEN = 40
@@ -323,10 +324,10 @@ def api_update_lecture(lid: int, body: LectureUpdate):
         fields.append("title=?")
         params.append(title)
     if body.tag is not None:
-        if body.tag not in LECTURE_TAGS:
-            raise HTTPException(400, f"Tag must be one of {', '.join(LECTURE_TAGS)}")
+        # Free text; blank resets to the default strand.
+        tag = " ".join(body.tag.split())[:MAX_TAG_LEN] or DEFAULT_TAG
         fields.append("tag=?")
-        params.append(body.tag)
+        params.append(tag)
     # model_fields_set distinguishes "week omitted" from "week: null" (clear it).
     if "week" in body.model_fields_set:
         week = " ".join(str(body.week).split())[:MAX_WEEK_LEN] if body.week is not None else ""

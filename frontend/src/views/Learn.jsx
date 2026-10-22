@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { weekText, weekLabel, weekCompare } from "../lib/format";
+import { weekText, weekLabel, weekCompare, tagLabel } from "../lib/format";
 import { SessionRow } from "../components/SessionRow";
 import { notifyLecturesChanged, onLecturesChanged, notifySessionsChanged, onSessionsChanged } from "../lib/events";
 
@@ -263,34 +263,47 @@ function shortLabel(s, n = 60) {
 }
 
 // ---------- Lecture list (grouped by week, tagged by course strand) ----------
-const TAG_LABELS = { foundations: "Foundations", doctoring: "Doctoring", anatomy: "Anatomy" };
-const TAG_OPTIONS = Object.entries(TAG_LABELS).map(([value, label]) => ({ value, label }));
-
-// Click a tag to edit it in place (no navigation into the lecture) - a native
-// select/number input replaces the pill until it blurs or commits.
-function EditableTagPill({ value, onSave }) {
+// Click a tag to edit it in place (no navigation into the lecture). It's free
+// text; the datalist suggests the strands already in use.
+function EditableTagPill({ value, suggestions, onSave }) {
   const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+
+  async function commit() {
+    setEditing(false);
+    const t = val.trim();
+    if (t && t !== (value || "foundations")) await onSave(t);
+  }
+
   if (editing) {
     return (
-      <select
-        autoFocus
-        className="tag-pill tag-edit"
-        value={value || "foundations"}
-        onClick={(e) => e.stopPropagation()}
-        onBlur={() => setEditing(false)}
-        onChange={async (e) => { await onSave(e.target.value); setEditing(false); }}
-      >
-        {TAG_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      <>
+        <input
+          autoFocus
+          type="text"
+          maxLength={40}
+          list="tag-suggestions"
+          className="tag-pill tag-edit"
+          value={val}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        />
+        <datalist id="tag-suggestions">
+          {suggestions.map((t) => <option key={t} value={t} />)}
+        </datalist>
+      </>
     );
   }
   return (
     <button
       type="button"
-      className={`tag-pill tag-${value || "foundations"}`}
-      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      className="tag-pill"
+      title={tagLabel(value)}
+      onClick={(e) => { e.stopPropagation(); setVal(value || "foundations"); setEditing(true); }}
     >
-      {TAG_LABELS[value] || TAG_LABELS.foundations}
+      {tagLabel(value)}
     </button>
   );
 }
@@ -376,12 +389,12 @@ function EditableLectureTitle({ title, onSave }) {
 // Background analysis (OCR -> captions -> summary) is in flight for this lecture.
 const isBusy = (l) => l.ocr_status === "running" || l.summary_status === "generating";
 
-function LectureRow({ l, onPick, onUpdate }) {
+function LectureRow({ l, onPick, onUpdate, tagSuggestions }) {
   return (
     <li className="lecture-row lecture-row-tagged">
       <div className="lecture-tags">
         <EditableWeekPill week={l.week} onSave={(week) => onUpdate(l.id, { week })} />
-        <EditableTagPill value={l.tag} onSave={(tag) => onUpdate(l.id, { tag })} />
+        <EditableTagPill value={l.tag} suggestions={tagSuggestions} onSave={(tag) => onUpdate(l.id, { tag })} />
       </div>
       <div className="lecture-main" onClick={() => onPick(l.id)}>
         <EditableLectureTitle title={l.title} onSave={(title) => onUpdate(l.id, { title })} />
@@ -400,6 +413,10 @@ function LectureRow({ l, onPick, onUpdate }) {
 }
 
 function LectureList({ lectures, onPick, onUpdate }) {
+  const tagSuggestions = useMemo(
+    () => [...new Set(["foundations", "doctoring", "anatomy", ...lectures.map((l) => l.tag).filter(Boolean)])],
+    [lectures]
+  );
   const groups = useMemo(() => {
     const byWeek = new Map();
     for (const l of lectures) {
@@ -431,7 +448,7 @@ function LectureList({ lectures, onPick, onUpdate }) {
             <span className="muted" style={{ fontSize: 12 }}>{g.practicedPct}%</span>
           </div>
           <ul className="detail-list">
-            {g.items.map((l) => <LectureRow key={l.id} l={l} onPick={onPick} onUpdate={onUpdate} />)}
+            {g.items.map((l) => <LectureRow key={l.id} l={l} onPick={onPick} onUpdate={onUpdate} tagSuggestions={tagSuggestions} />)}
           </ul>
         </div>
       ))}
