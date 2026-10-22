@@ -2,6 +2,7 @@ import os
 import re
 import pymupdf as fitz
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.db import get_conn
 
@@ -17,21 +18,34 @@ def extract_pdf(path):
     return pages
 
 
+def _shape_text(shapes, parts):
+    """Collect text from shapes, recursing into groups (text boxes inside a
+    group were silently dropped)."""
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            _shape_text(shape.shapes, parts)
+            continue
+        if shape.has_text_frame:
+            for para in shape.text_frame.paragraphs:
+                txt = "".join(run.text for run in para.runs).strip()
+                if txt:
+                    parts.append(txt)
+        if getattr(shape, "has_table", False) and shape.has_table:
+            for row in shape.table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                parts.append(" | ".join(cells))
+
+
 def extract_pptx(path):
     prs = Presentation(path)
     slides = []
     for i, slide in enumerate(prs.slides):
         parts = []
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                for para in shape.text_frame.paragraphs:
-                    txt = "".join(run.text for run in para.runs).strip()
-                    if txt:
-                        parts.append(txt)
-            if shape.has_table:
-                for row in shape.table.rows:
-                    cells = [c.text.strip() for c in row.cells]
-                    parts.append(" | ".join(cells))
+        _shape_text(slide.shapes, parts)
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame
+            if notes is not None and notes.text.strip():
+                parts.append("Speaker notes: " + notes.text.strip())
         text = " ".join(parts)
         text = re.sub(r"\s+", " ", text).strip()
         slides.append((i + 1, text))
@@ -43,13 +57,20 @@ def slugify(name):
     return name.strip("_")
 
 
-def import_lecture(path):
+def extract_slides(path):
+    """Parse a PDF/PPTX into [(slide_num, text)]."""
+    return extract_pdf(path) if path.lower().endswith(".pdf") else extract_pptx(path)
+
+
+def import_lecture(path, slides=None):
+    """`slides` lets the caller pass an already-parsed deck (upload parses once)."""
     ext = os.path.splitext(path)[1].lower()
     base = os.path.basename(path)
     title = os.path.splitext(base)[0]
 
     # Slow extraction first, before touching the DB, so no lock is held during it.
-    slides = extract_pdf(path) if ext == ".pdf" else extract_pptx(path)
+    if slides is None:
+        slides = extract_slides(path)
 
     conn = get_conn()
     cur = conn.execute(

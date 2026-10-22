@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS lectures (
     summary_status TEXT DEFAULT 'not_started',
     ocr_status TEXT DEFAULT 'not_run',
     tag TEXT DEFAULT 'foundations',     -- course strand: foundations | doctoring | anatomy
-    week INTEGER                        -- course week the lecture was given (NULL = untagged)
+    week INTEGER,                       -- course week the lecture was given (NULL = untagged)
+    analysis_error TEXT DEFAULT ''      -- why the last OCR/caption/summary run failed ('' = fine)
 );
 
 CREATE TABLE IF NOT EXISTS slides (
@@ -196,8 +197,18 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     _migrate(conn)
+    _reset_stuck_statuses(conn)
     _shuffle_unanswered_options(conn)
     conn.close()
+
+
+def _reset_stuck_statuses(conn):
+    """Analysis runs in background threads that die with the process. Anything
+    still 'running'/'generating' at startup is orphaned and would otherwise
+    block OCR forever and show a spinner with no way out."""
+    conn.execute("UPDATE lectures SET ocr_status='error' WHERE ocr_status='running'")
+    conn.execute("UPDATE lectures SET summary_status='error' WHERE summary_status='generating'")
+    conn.commit()
 
 
 # Pre-shuffle-fix versions skewed toward putting the correct option first, so users on
@@ -248,6 +259,7 @@ EXPECTED_COLUMNS = {
         ("ocr_status", "TEXT DEFAULT 'not_run'"),
         ("tag", "TEXT DEFAULT 'foundations'"),
         ("week", "INTEGER"),
+        ("analysis_error", "TEXT DEFAULT ''"),
     ],
     "scheduler_state": [
         ("learning_step", "INTEGER DEFAULT 0"),

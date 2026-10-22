@@ -372,6 +372,9 @@ function EditableLectureTitle({ title, onSave }) {
   );
 }
 
+// Background analysis (OCR -> captions -> summary) is in flight for this lecture.
+const isBusy = (l) => l.ocr_status === "running" || l.summary_status === "generating";
+
 function LectureRow({ l, onPick, onUpdate }) {
   return (
     <li className="lecture-row lecture-row-tagged">
@@ -383,6 +386,8 @@ function LectureRow({ l, onPick, onUpdate }) {
         <EditableLectureTitle title={l.title} onSave={(title) => onUpdate(l.id, { title })} />
         <div className="muted" style={{ fontSize: 12.5 }}>
           {l.slide_count} slides · {l.summary_status === "done" ? "summary ready" : l.summary_status}
+          {isBusy(l) && <span className="analyzing-pill">Analyzing…</span>}
+          {l.analysis_error && !isBusy(l) && <span className="analysis-error" title={l.analysis_error}>needs attention</span>}
         </div>
       </div>
       <div className="lecture-coverage">
@@ -434,7 +439,7 @@ function LectureList({ lectures, onPick, onUpdate }) {
 }
 
 // ---------- Lecture detail (summary + deck) ----------
-function LectureView({ lecture, onBack }) {
+function LectureView({ lecture, onBack, onDeleted }) {
   const [summary, setSummary] = useState(undefined);
   const [generating, setGenerating] = useState(false);
   const [deck, setDeck] = useState(null);
@@ -445,10 +450,25 @@ function LectureView({ lecture, onBack }) {
     setSummary(await api.get(`/api/lectures/${lecture.id}/summary`));
   }
 
+  const busy = isBusy(lecture);
+  // Learn polls the lecture list while analysis runs; reload the summary and
+  // slide captions whenever a run finishes (busy flips back to false).
   useEffect(() => {
     loadSummary();
     api.get(`/api/lectures/${lecture.id}/deck`).then(setDeck);
-  }, [lecture.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lecture.id, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function reanalyze() {
+    await api.post(`/api/lectures/${lecture.id}/reanalyze`);
+    notifyLecturesChanged();
+  }
+
+  async function remove() {
+    if (!window.confirm(`Delete "${lecture.title}"? Its slides, summary and generated questions are removed. This can't be undone.`)) return;
+    await api.del(`/api/lectures/${lecture.id}`);
+    notifyLecturesChanged();
+    onDeleted();
+  }
 
   async function generate() {
     setGenerating(true);
@@ -467,7 +487,17 @@ function LectureView({ lecture, onBack }) {
       <button className="btn ghost sm" onClick={onBack}>← Lectures</button>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3>{lecture.title}</h3>
+        <div className="lecture-head">
+          <h3>{lecture.title}</h3>
+          {busy && <span className="analyzing-pill">Analyzing…</span>}
+          <span className="lecture-head-actions">
+            <button className="btn ghost sm" disabled={busy} onClick={reanalyze}>Reanalyze</button>
+            <button className="btn ghost sm" onClick={remove}>Delete</button>
+          </span>
+        </div>
+        {lecture.analysis_error && !busy && (
+          <div className="analysis-error-box">Analysis hit a problem: {lecture.analysis_error}. Try Reanalyze, or check your key and model in Settings.</div>
+        )}
         {summary === undefined ? (
           <div className="muted">Loading summary…</div>
         ) : summary.status === "done" && summary.summary ? (
@@ -490,7 +520,10 @@ function LectureView({ lecture, onBack }) {
             </button>
           </>
         ) : summary.status === "generating" ? (
-          <div className="muted">Generating summary…</div>
+          <div className="muted">
+            Generating summary…{" "}
+            <button className="btn ghost sm" disabled={generating} onClick={generate}>Retry</button>
+          </div>
         ) : (
           <button className="btn" disabled={generating} onClick={generate}>
             {generating ? "Generating…" : "Generate summary"}
@@ -576,14 +609,24 @@ function InProgressSessions({ onOpenSession }) {
 export function Learn({ onOpenSession }) {
   const [lectures, setLectures] = useState([]);
   const [lectureId, setLectureId] = useState(null);
+  const [query, setQuery] = useState("");
 
-  function refresh() { api.get("/api/lectures").then(setLectures); }
+  function refresh() { api.get("/api/lectures").then(setLectures).catch(() => {}); }
   useEffect(() => {
     refresh();
     // Dashboard's importer and this view's own rename/retag both change the
     // lecture list - refetch whenever either happens elsewhere too.
     return onLecturesChanged(refresh);
   }, []);
+
+  // Poll while any lecture is still being analysed so pills and summaries
+  // update without a manual reload.
+  const anyBusy = lectures.some(isBusy);
+  useEffect(() => {
+    if (!anyBusy) return;
+    const t = setInterval(refresh, 4000);
+    return () => clearInterval(t);
+  }, [anyBusy]);
 
   async function updateLecture(id, patch) {
     const updated = await api.patch(`/api/lectures/${id}`, patch);
@@ -594,12 +637,26 @@ export function Learn({ onOpenSession }) {
   const lecture = lectures.find((l) => l.id === lectureId);
 
   return lecture ? (
-    <LectureView lecture={lecture} onBack={() => setLectureId(null)} />
+    <LectureView lecture={lecture} onBack={() => setLectureId(null)} onDeleted={() => setLectureId(null)} />
   ) : (
     <div>
       <div className="card">
         <h3>Lectures</h3>
-        <LectureList lectures={lectures} onPick={setLectureId} onUpdate={updateLecture} />
+        {lectures.length > 4 && (
+          <input
+            type="search"
+            className="lecture-search"
+            placeholder="Search lectures…"
+            aria-label="Search lectures"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
+        <LectureList
+          lectures={query.trim() ? lectures.filter((l) => l.title.toLowerCase().includes(query.trim().toLowerCase())) : lectures}
+          onPick={setLectureId}
+          onUpdate={updateLecture}
+        />
       </div>
       <InProgressSessions onOpenSession={onOpenSession} />
     </div>

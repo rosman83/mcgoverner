@@ -128,6 +128,9 @@ def run_ocr_for_lecture(lecture_id):
                 first_abs = os.path.join(IMAGES_ROOT, paths[0])
                 if os.path.exists(first_abs):
                     try:
+                        # Full-page PDF renders are ~1900px wide; vision bills by size.
+                        from app.ingest.images import _downscale_if_large
+                        _downscale_if_large(first_abs)
                         desc = describe_image(first_abs, VISION_PROMPT, kind="slide_vision")
                     except Exception as e:
                         print(f"vision describe failed for {first_abs}: {e}")

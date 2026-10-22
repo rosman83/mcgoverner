@@ -68,6 +68,7 @@ def generate_summary(lecture_id, on_progress=None):
     conn.close()
 
     text = build_lecture_text(lecture_id)
+    ok = False
     try:
         result = chat_json(
             SUMMARY_PROMPT.format(title=row["title"], text=text),
@@ -76,28 +77,29 @@ def generate_summary(lecture_id, on_progress=None):
             max_tokens=4000,
             kind="summary",
         )
-    except Exception as e:
+        body, key_points = result.get("summary"), result.get("key_points")
+        if not isinstance(body, str) or not body.strip() or not isinstance(key_points, list):
+            raise ValueError("The AI's summary reply was missing its summary or key points. Try again.")
         conn = get_conn()
         conn.execute(
-            "UPDATE lectures SET summary_status='error' WHERE id=?", (lecture_id,)
+            "INSERT INTO summaries(lecture_id, body, key_points) VALUES(?,?,?) "
+            "ON CONFLICT(lecture_id) DO UPDATE SET body=excluded.body, "
+            "key_points=excluded.key_points, created_at=datetime('now')",
+            (lecture_id, body, json.dumps(key_points)),
         )
         conn.commit()
         conn.close()
-        raise e
-
-    conn = get_conn()
-    conn.execute(
-        "INSERT INTO summaries(lecture_id, body, key_points) VALUES(?,?,?) "
-        "ON CONFLICT(lecture_id) DO UPDATE SET body=excluded.body, "
-        "key_points=excluded.key_points, created_at=datetime('now')",
-        (lecture_id, result["summary"], json.dumps(result["key_points"])),
-    )
-    conn.execute(
-        "UPDATE lectures SET summary_status='done' WHERE id=?", (lecture_id,)
-    )
-    conn.commit()
-    conn.close()
-    return result
+        ok = True
+        return result
+    finally:
+        # Whatever went wrong (API error, malformed reply), never leave 'generating'.
+        conn = get_conn()
+        conn.execute(
+            "UPDATE lectures SET summary_status=? WHERE id=?",
+            ("done" if ok else "error", lecture_id),
+        )
+        conn.commit()
+        conn.close()
 
 
 def get_summary(lecture_id):

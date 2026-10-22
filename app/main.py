@@ -7,6 +7,7 @@ import subprocess
 import threading
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
@@ -219,7 +220,8 @@ def _save_upload(f):
 # Plain `def`, not `async def`: parsing a big deck is slow, blocking work, and
 # in an async route it froze the whole server (every other request stalled).
 @app.post("/api/lectures/import")
-def api_import_lectures(files: list[UploadFile] = File(...)):
+def api_import_lectures(files: list[UploadFile] = File(...), force: bool = Form(False)):
+    """force=true imports even if a file looks like a duplicate ("Import anyway")."""
     imported = []
     errors = []
     duplicates = []
@@ -231,9 +233,11 @@ def api_import_lectures(files: list[UploadFile] = File(...)):
         dest = None
         try:
             dest = _save_upload(f)
-            # Detect duplicates before importing
+            # Parse once; the duplicate check and the import share the result.
             from app.ingest.duplicates import detect_duplicate_file
-            dup = detect_duplicate_file(dest)
+            from app.ingest.slides import extract_slides
+            slides = extract_slides(dest)
+            dup = None if force else detect_duplicate_file(dest, slides=slides)
             if dup:
                 # remove the temp file we just saved
                 try:
@@ -244,14 +248,13 @@ def api_import_lectures(files: list[UploadFile] = File(...)):
                     {"filename": f.filename, "dup_of": dup["lecture_id"], "title": dup["title"], "score": dup["score"]}
                 )
                 continue
-            lid = import_lecture(dest)
+            lid = import_lecture(dest, slides=slides)
             imported.append(lid)
             # New users have no idea OCR/captions/summaries are separate manual
             # steps, and shouldn't need to - kick off the full pipeline right
             # away so a freshly imported lecture is already usable by the time
             # they click into it.
-            import threading
-            threading.Thread(target=_analyze_lecture, args=(lid,), daemon=True).start()
+            _queue_analysis(lid)
         except Exception as e:
             errors.append(f"{f.filename}: {e}")
             if dest and os.path.exists(dest):
@@ -418,41 +421,65 @@ def api_extract_images(lid: int):
 def _analyze_lecture(lid, force_captions=False):
     """The full pipeline: OCR -> captions -> summary. Runs automatically right
     after import (new users never have to know these steps exist), and is also
-    what the "Reanalyze" button re-runs on demand. Same total LLM spend either
-    way - this doesn't do any work the old separate OCR/Captions/Generate-summary
-    buttons didn't already do, it just stops requiring three manual clicks."""
-    from app.ingest.ocr import run_ocr_for_lecture
-    run_ocr_for_lecture(lid)
-    try:
+    what the "Reanalyze" button re-runs on demand. Each step is isolated so one
+    failure doesn't skip the rest; the first failure's reason is stored on the
+    lecture (analysis_error) so the UI can show it instead of failing silently."""
+    errors = []
+
+    def step(name, fn):
+        try:
+            fn()
+        except Exception as e:
+            print(f"{name} failed for lecture {lid}: {e}")
+            errors.append(f"{name}: {e}")
+
+    def ocr():
+        from app.ingest.ocr import run_ocr_for_lecture
+        run_ocr_for_lecture(lid)
+
+    def captions():
         from app.llm.captions import generate_captions_for_lecture
         generate_captions_for_lecture(lid, force=force_captions)
-    except Exception as e:
-        print(f"caption generation failed for lecture {lid}: {e}")
-    try:
-        generate_summary(lid)
-    except Exception as e:
-        print(f"summary generation failed for lecture {lid}: {e}")
+
+    step("OCR", ocr)
+    step("Captions", captions)
+    step("Summary", lambda: generate_summary(lid))
+    conn = get_conn()
+    conn.execute("UPDATE lectures SET analysis_error=? WHERE id=?", ("; ".join(errors)[:500], lid))
+    conn.commit()
+    conn.close()
+
+
+# One worker: importing 10 lectures used to start 10 threads x (4 caption
+# workers + summary) = 40+ simultaneous AI calls -> 429s and SQLite lock fights.
+# Lectures are analysed one at a time, in upload order.
+_analysis_pool = ThreadPoolExecutor(max_workers=1)
+
+
+def _queue_analysis(lid, force_captions=False):
+    # Mark queued lectures as busy right away so the UI shows "Analyzing…"
+    # (and polls) while they wait their turn.
+    conn = get_conn()
+    conn.execute("UPDATE lectures SET summary_status='generating', analysis_error='' WHERE id=?", (lid,))
+    conn.commit()
+    conn.close()
+    _analysis_pool.submit(_analyze_lecture, lid, force_captions)
 
 
 @app.post("/api/lectures/{lid}/ocr")
 def api_ocr_lecture(lid: int):
     """Run OCR on all slide images for a lecture (background)."""
-    import threading
     # force_captions=False: OCR is deterministic, so re-running it usually yields
     # the same text and existing captions stay valid. /reanalyze is the explicit
     # "redo everything" path.
-    threading.Thread(target=_analyze_lecture, args=(lid,), daemon=True).start()
+    _queue_analysis(lid)
     return {"status": "started"}
 
 
 @app.post("/api/lectures/{lid}/reanalyze")
 def api_reanalyze_lecture(lid: int):
-    """Full redo: OCR + captions + summary, forcing regeneration of all three.
-    The one button a user needs after re-running OCR turns up better image
-    content (vision fallback improvements, etc.) - no need to know there used
-    to be three separate steps for this."""
-    import threading
-    threading.Thread(target=_analyze_lecture, args=(lid,), kwargs={"force_captions": True}, daemon=True).start()
+    """Full redo: OCR + captions + summary, forcing regeneration of all three."""
+    _queue_analysis(lid, force_captions=True)
     return {"status": "started"}
 
 
@@ -460,11 +487,7 @@ def api_reanalyze_lecture(lid: int):
 def api_captions_lecture(lid: int):
     """Generate reasoned image captions from OCR text (background)."""
     from app.llm.captions import generate_captions_for_lecture
-    import threading
-    threading.Thread(
-        target=generate_captions_for_lecture, args=(lid,), kwargs={"force": True},
-        daemon=True,
-    ).start()
+    _analysis_pool.submit(generate_captions_for_lecture, lid, True)
     return {"status": "started"}
 
 
@@ -478,7 +501,7 @@ def api_ocr_status(lid: int):
 def api_delete_lecture(lid: int):
     conn = get_conn()
     row = conn.execute(
-        "SELECT id FROM lectures WHERE id=?", (lid,)
+        "SELECT id, filename FROM lectures WHERE id=?", (lid,)
     ).fetchone()
     if not row:
         conn.close()
@@ -486,6 +509,15 @@ def api_delete_lecture(lid: int):
     # Remove everything belonging to this lecture (FK cascades handle the rest)
     conn.execute("DELETE FROM lectures WHERE id=?", (lid,))
     conn.commit()
+    # ...and its files, which otherwise stay on disk forever. Another lecture
+    # may share the source filename only via a bug; _save_upload makes names unique.
+    from app.ingest.images import IMAGES_ROOT
+    shutil.rmtree(os.path.join(IMAGES_ROOT, str(lid)), ignore_errors=True)
+    if row["filename"]:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, os.path.basename(row["filename"])))
+        except OSError:
+            pass
     conn.close()
     return {"deleted": lid}
 
