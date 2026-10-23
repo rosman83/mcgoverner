@@ -1,8 +1,5 @@
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 import pymupdf as fitz
 from PIL import Image, UnidentifiedImageError
 from pptx import Presentation
@@ -154,28 +151,6 @@ def extract_pptx_images(lecture_id, path, conn=None):
             conn.close()
 
 
-def _soffice():
-    for c in (shutil.which("soffice"), shutil.which("libreoffice"),
-              "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-              r"C:\Program Files\LibreOffice\program\soffice.exe"):
-        if c and os.path.exists(c):
-            return c
-
-
-def _pptx_to_pdf(path, outdir):
-    """Full-slide PDF via LibreOffice, or None if it isn't installed / fails."""
-    exe = _soffice()
-    if not exe:
-        return None
-    try:
-        subprocess.run([exe, "--headless", "--convert-to", "pdf", "--outdir", outdir, path],
-                       check=True, capture_output=True, timeout=300)
-    except (subprocess.SubprocessError, OSError):
-        return None
-    pdf = os.path.join(outdir, os.path.splitext(os.path.basename(path))[0] + ".pdf")
-    return pdf if os.path.exists(pdf) else None
-
-
 def extract_lecture_images(lecture_id):
     """Extract images for a lecture. Returns (count, source_type)."""
     conn = get_conn()
@@ -194,17 +169,8 @@ def extract_lecture_images(lecture_id):
         count = extract_pdf_images(lecture_id, filepath, conn=conn)
         kind = "page"
     else:
-        # Prefer rendering whole slides (what people expect to see); fall back to
-        # embedded pictures when LibreOffice is missing or page count doesn't line up.
-        # ponytail: hidden slides can skew page count -> falls back to embedded pics.
-        with tempfile.TemporaryDirectory() as tmp:
-            pdf = _pptx_to_pdf(filepath, tmp)
-            if pdf and len(fitz.open(pdf)) == len(Presentation(filepath).slides):
-                count = extract_pdf_images(lecture_id, pdf, conn=conn)
-                kind = "page"
-            else:
-                count = extract_pptx_images(lecture_id, filepath, conn=conn)
-                kind = "embedded"
+        count = extract_pptx_images(lecture_id, filepath, conn=conn)
+        kind = "embedded"
     conn.commit()
     conn.close()
     return count, kind
