@@ -378,11 +378,15 @@ def _best_slide_index(qtext, batch, declared):
     qwords = _content_words(qtext)
     if not qwords:
         return declared
-    scores = [
-        len(qwords & _content_words(s["text"] + " " + (s["caption"] or "")))
-        for s in batch
-    ]
-    best = max(range(len(batch)), key=lambda i: scores[i])
+    # Only re-anchor within the declared slide's lecture: a batch can span lectures, and
+    # moving a question across them pairs it with the wrong lecture's slide image and
+    # makes its "(slide N)" citations resolve against the wrong deck.
+    same = [i for i, s in enumerate(batch) if s["lecture_id"] == batch[declared]["lecture_id"]]
+    scores = {
+        i: len(qwords & _content_words(batch[i]["text"] + " " + (batch[i]["caption"] or "")))
+        for i in same
+    }
+    best = max(same, key=lambda i: scores[i])
     return declared if scores[best] == 0 else best
 
 
@@ -420,6 +424,9 @@ def generate_questions_for_slides(slides, batch_size=BATCH_SIZE, max_workers=4):
     Returns list of dicts ready to store (slide-anchored). One failed batch is
     tolerated; if EVERY batch fails, the first error is raised so the user sees
     why (bad key, no credit, model down) instead of a vague "check the log"."""
+    # Group by lecture so a batch (and its "ADDITIONAL question on another slide"
+    # fallback) stays inside one lecture's slide numbering.
+    slides = sorted(slides, key=lambda s: s["lecture_id"])
     batches = [slides[i:i + batch_size] for i in range(0, len(slides), batch_size)]
     out = []
     errors = []
