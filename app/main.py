@@ -389,11 +389,11 @@ def api_lecture_deck(lid: int):
 def api_lecture_slide(lid: int, num: int):
     """One slide by its number — backs the expandable footnotes in summaries and
     question explanations."""
-    from app.ingest.images import images_for_slides
+    from app.ingest.images import images_for_slides, extract_lecture_images
 
     conn = get_conn()
     row = conn.execute(
-        "SELECT s.id, s.slide_num, s.text, s.caption, s.ocr_text, l.title AS lecture_title "
+        "SELECT s.id, s.slide_num, s.text, s.caption, s.ocr_text, l.title AS lecture_title, l.source "
         "FROM slides s JOIN lectures l ON l.id=s.lecture_id "
         "WHERE s.lecture_id=? AND s.slide_num=?",
         (lid, num),
@@ -403,6 +403,15 @@ def api_lecture_slide(lid: int, num: int):
         raise HTTPException(404, "Slide not found")
     d = dict(row)
     d["images"] = images_for_slides([d["id"]])
+    if not d["images"] and d.pop("source") == "pdf":
+        # Page renders missing (import-time extraction failed, or a pre-images upload):
+        # redo it once so the slide shows instead of only its text.
+        try:
+            extract_lecture_images(lid)
+            d["images"] = images_for_slides([d["id"]])
+        except Exception as e:
+            print(f"lazy image extraction for lecture {lid} failed: {e}")
+    d.pop("source", None)
     return d
 
 

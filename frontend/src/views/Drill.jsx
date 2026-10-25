@@ -92,7 +92,7 @@ function SourceBlock({ images, slide, source, onCite }) {
   );
 }
 
-function SlideModal({ lectureId, slideNum, onClose }) {
+function SlideModal({ lectureId, slideNum, explanation, onClose }) {
   const [slide, setSlide] = useState(null);
   useEffect(() => {
     setSlide(null);
@@ -107,7 +107,8 @@ function SlideModal({ lectureId, slideNum, onClose }) {
           <>
             <h3>{slide.lecture_title} · Slide {slide.slide_num}</h3>
             {slide.images?.map((u) => <img key={u} className="slide-modal-img" src={u} alt={slide.caption || "Lecture slide"} />)}
-            <p>{slide.text}</p>
+            {/* The question's own explanation beats raw slide text, which reads as OCR noise. */}
+            {explanation ? renderExplanation(explanation, lectureId, () => {}) : <p>{slide.text}</p>}
           </>
         )}
       </div>
@@ -344,8 +345,8 @@ function QuestionCard({ sid, question, tutorMode, onAnswered, onNext, stopTimer,
               </span>
             )}
           </div>
-          {renderExplanation(result.explanation, question.lecture_id, cite)}
-          <SourceBlock images={question.source_images} slide={question.source_slide} source={question.question_source} onCite={cite} />
+          {renderExplanation(result.explanation, question.lecture_id, (l, n) => cite(l, n, result.explanation))}
+          <SourceBlock images={question.source_images} slide={question.source_slide} source={question.question_source} onCite={(l, n) => cite(l, n, result.explanation)} />
         </div>
       )}
       <div className="quiz-nav">
@@ -466,7 +467,7 @@ function SessionReview({ sid, onBack, cite }) {
                 </div>
                 <div className="review-explain-row">
                   <div className="review-explain">
-                    <strong>Explanation:</strong> {renderExplanation(q.explanation, q.lecture_id, cite)}
+                    <strong>Explanation:</strong> {renderExplanation(q.explanation, q.lecture_id, (l, n) => cite(l, n, q.explanation))}
                   </div>
                   {tutorMode && q.lecture_title && (
                     <span className="source-pill">
@@ -478,7 +479,7 @@ function SessionReview({ sid, onBack, cite }) {
                   images={q.source_images}
                   slide={{ lecture_id: q.lecture_id, lecture_title: q.lecture_title, slide_num: q.slide_num, caption: q.slide_caption }}
                   source={q.question_source}
-                  onCite={cite}
+                  onCite={(l, n) => cite(l, n, q.explanation)}
                 />
               </div>
             );
@@ -672,18 +673,18 @@ export function Drill({ openSessionId, onOpenSessionHandled }) {
             }}
             modalOpen={!!citeTarget}
             stopTimer={stopTimer}
-            cite={(lectureId, slideNum) => setCiteTarget({ lectureId, slideNum })}
+            cite={(lectureId, slideNum, explanation) => setCiteTarget({ lectureId, slideNum, explanation })}
           />
         </div>
       )}
       {screen === "active" && !question && <div className="muted">Loading…</div>}
 
       {screen === "review" && sid && (
-        <SessionReview sid={sid} onBack={backToSetup} cite={(lectureId, slideNum) => setCiteTarget({ lectureId, slideNum })} />
+        <SessionReview sid={sid} onBack={backToSetup} cite={(lectureId, slideNum, explanation) => setCiteTarget({ lectureId, slideNum, explanation })} />
       )}
 
       {citeTarget && (
-        <SlideModal lectureId={citeTarget.lectureId} slideNum={citeTarget.slideNum} onClose={() => setCiteTarget(null)} />
+        <SlideModal lectureId={citeTarget.lectureId} slideNum={citeTarget.slideNum} explanation={citeTarget.explanation} onClose={() => setCiteTarget(null)} />
       )}
     </div>
   );
